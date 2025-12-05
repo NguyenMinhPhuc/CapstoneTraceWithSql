@@ -43,6 +43,8 @@ export function ClassAdvisorManagement({
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
   const canAssign = !!user && user.role === "admin";
+  const canExport =
+    !!user && (user.role === "admin" || user.role === "supervisor");
   const [advisors, setAdvisors] = useState<ClassAdvisor[]>([]);
   const [loading, setLoading] = useState(true);
   // UI state for search/filter/sort/pagination
@@ -235,6 +237,71 @@ export function ClassAdvisorManagement({
     }
   };
 
+  const exportAdvisorsCsv = (rows: ClassAdvisor[]) => {
+    if (!rows || rows.length === 0) {
+      toast({ title: "Không có dữ liệu để xuất" });
+      return;
+    }
+
+    const headers = [
+      "Lớp",
+      "Mã lớp",
+      "Giáo viên",
+      "Email giáo viên",
+      "Học kỳ",
+      "Năm học",
+      "Ngày phân công",
+      "Trạng thái",
+      "Số SV",
+      "Số hồ sơ",
+      "Ghi chú",
+    ];
+
+    const escapeCsv = (v: any) => {
+      if (v == null) return "";
+      const s = String(v);
+      // Escape double quotes by doubling
+      const quoted = s.replace(/"/g, '""');
+      return `"${quoted}"`;
+    };
+
+    const lines = [headers.join(",")];
+
+    for (const r of rows) {
+      const line = [
+        escapeCsv(r.class_name),
+        escapeCsv(r.class_code),
+        escapeCsv(r.teacher_name),
+        escapeCsv(r.teacher_email),
+        escapeCsv(r.semester),
+        escapeCsv(r.academic_year),
+        escapeCsv(
+          r.assigned_date
+            ? new Date(r.assigned_date).toLocaleString("vi-VN")
+            : ""
+        ),
+        escapeCsv(r.is_active ? "Đang hoạt động" : "Đã kết thúc"),
+        escapeCsv(r.student_count ?? 0),
+        escapeCsv(r.profile_count ?? 0),
+        escapeCsv(r.notes ?? ""),
+      ].join(",");
+      lines.push(line);
+    }
+
+    // Prepend UTF-8 BOM so Excel opens VN characters properly
+    const csvContent = "\uFEFF" + lines.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.download = `class-advisors-${ts}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const handleDeactivate = async (id: number) => {
     if (!confirm("Bạn có chắc muốn kết thúc phân công này?")) return;
 
@@ -259,12 +326,23 @@ export function ClassAdvisorManagement({
       {/* Header (title removed — page provides the main title) */}
       <div className="flex items-center justify-between">
         <div />
-        {canAssign ? (
-          <Button onClick={() => setShowAssignDialog(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Phân công GV
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {canExport && (
+            <Button
+              variant="outline"
+              onClick={() => exportAdvisorsCsv(filtered)}
+              title="Xuất danh sách phân công (CSV)"
+            >
+              Xuất Excel
+            </Button>
+          )}
+          {canAssign ? (
+            <Button onClick={() => setShowAssignDialog(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Phân công GV
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {/* Controls: search / filters / page size */}

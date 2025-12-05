@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Table,
   TableBody,
@@ -12,8 +12,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
-import { useCollection, useFirestore, useMemoFirebase } from "@/firebase";
-import { collection, query, where } from "firebase/firestore";
+import { useFirestore, useMemoFirebase } from "@/firebase";
+import { companiesService } from "@/services/companies.service";
 import type {
   DefenseRegistration,
   InternshipCompany,
@@ -64,26 +64,58 @@ export function MyCompanyStudentsTable({
   const firestore = useFirestore();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState("all");
-
-  // Get companies owned by this supervisor
-  const companiesQuery = useMemoFirebase(
-    () =>
-      query(
-        collection(firestore, "internshipCompanies"),
-        where("ownerSupervisorId", "==", supervisorId)
-      ),
-    [firestore, supervisorId]
+  const [ownedCompanies, setOwnedCompanies] = useState<
+    InternshipCompany[] | null
+  >(null);
+  const [allCompanies, setAllCompanies] = useState<InternshipCompany[] | null>(
+    null
   );
-  const { data: ownedCompanies, isLoading: isLoadingCompanies } =
-    useCollection<InternshipCompany>(companiesQuery);
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState<boolean>(true);
 
-  // Get companies where supervisor manages a position
-  const allCompaniesQuery = useMemoFirebase(
-    () => collection(firestore, "internshipCompanies"),
-    [firestore]
-  );
-  const { data: allCompanies } =
-    useCollection<InternshipCompany>(allCompaniesQuery);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setIsLoadingCompanies(true);
+      try {
+        const list = await companiesService.getAll();
+        // Map backend Company to InternshipCompany shape minimally
+        const mapped = (list || []).map(
+          (c: any) =>
+            ({
+              id: String(c.id),
+              name: c.name,
+              address: c.address,
+              description: c.description,
+              website: c.website,
+              contactName: c.contact_person || c.manager_name || "",
+              contactEmail: c.email || "",
+              contactPhone: c.contact_phone || c.manager_phone || "",
+              isLHU: c.company_type === "lhu",
+              companySupervisorId: undefined,
+              companySupervisorName: undefined,
+              positions: c.positions || [],
+            } as InternshipCompany)
+        );
+        if (!mounted) return;
+        setAllCompanies(mapped);
+        // ownedCompanies: best-effort filter by ownerSupervisorId if backend provides it
+        setOwnedCompanies(
+          mapped.filter((mc) => (mc as any).ownerSupervisorId === supervisorId)
+        );
+      } catch (err) {
+        console.error("Failed to load companies from backend:", err);
+        if (mounted) {
+          setAllCompanies([]);
+          setOwnedCompanies([]);
+        }
+      } finally {
+        if (mounted) setIsLoadingCompanies(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [supervisorId]);
 
   // Find all companies where supervisor manages at least one position
   const managedCompanies = useMemo(() => {

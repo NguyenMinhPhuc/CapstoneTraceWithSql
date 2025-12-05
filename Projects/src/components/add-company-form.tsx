@@ -1,30 +1,34 @@
 "use client";
 
-import { zodResolver } from "@hookform/resolvers/zod";
+import React from "react";
 import { useForm, useWatch, useFieldArray } from "react-hook-form";
 import * as z from "zod";
-import { Button } from "@/components/ui/button";
+import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Form,
-  FormControl,
   FormField,
   FormItem,
   FormLabel,
+  FormControl,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { companiesService } from "@/services/companies.service";
+import {
+  supervisorsService,
+  type Supervisor,
+} from "@/services/supervisors.service";
 import { useToast } from "@/hooks/use-toast";
-import { useFirestore } from "@/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "./ui/dialog";
-import { ScrollArea } from "./ui/scroll-area";
-import { Switch } from "./ui/switch";
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import { SupervisorCombobox } from "./supervisor-combobox";
 import type { Supervisor } from "@/lib/types";
 import { Separator } from "./ui/separator";
@@ -32,6 +36,283 @@ import { PlusCircle, Trash2 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+const schema = z.object({
+  name: z.string().min(1),
+  external_id: z.string().optional(),
+  description: z.string().optional(),
+  website: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().optional(),
+  address: z.string().optional(),
+  manager_name: z.string().optional(),
+  manager_phone: z.string().optional(),
+  isLHU: z.boolean().optional(),
+});
+
+type FormValues = z.infer<typeof schema>;
+
+type AddCompanyFormApiProps = {
+  onSuccess?: () => void;
+  onFinished?: () => void;
+};
+
+export function AddCompanyFormApi({
+  onSuccess,
+  onFinished,
+}: AddCompanyFormApiProps) {
+  const { toast } = useToast();
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      name: "",
+      external_id: "",
+      description: "",
+      website: "",
+      phone: "",
+      email: "",
+      address: "",
+      manager_name: "",
+      manager_phone: "",
+      isLHU: false,
+    },
+  });
+  const isLHU = useWatch({ control: form.control, name: "isLHU" });
+  const [supervisors, setSupervisors] = React.useState<Supervisor[] | null>(
+    null
+  );
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const list = await supervisorsService.getAll();
+        if (mounted) setSupervisors(list || []);
+      } catch (err) {
+        // ignore; optional feature
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const onSubmit = async (values: FormValues) => {
+    try {
+      const payload: any = {
+        ...values,
+        company_type: values.isLHU ? "lhu" : "external",
+      };
+      // Remove the helper flag before sending
+      delete payload.isLHU;
+      await companiesService.create(payload as any);
+      toast({ title: "Đã thêm công ty" });
+      form.reset();
+      onSuccess?.();
+      onFinished?.();
+    } catch (e: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: e?.message || "Không thể thêm",
+      });
+    }
+  };
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tên công ty</FormLabel>
+              <FormControl>
+                <Input {...field} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="isLHU"
+          render={({ field }) => (
+            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <FormLabel>Loại doanh nghiệp</FormLabel>
+                <div className="text-sm text-muted-foreground">
+                  Chuyển sang nếu là đơn vị nội bộ LHU
+                </div>
+              </div>
+              <FormControl>
+                <Switch
+                  checked={!!field.value}
+                  onCheckedChange={field.onChange}
+                />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="description"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Mô tả</FormLabel>
+              <FormControl>
+                <Textarea {...field} rows={3} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+
+        <div className="grid grid-cols-2 gap-2">
+          <FormField
+            control={form.control}
+            name="phone"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Điện thoại</FormLabel>
+                <FormControl>
+                  <Input {...field} />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="email"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Email</FormLabel>
+                <FormControl>
+                  <Input {...field} />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        </div>
+
+        <FormField
+          control={form.control}
+          name="address"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Địa chỉ</FormLabel>
+              <FormControl>
+                <Input {...field} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+
+        <div className="grid grid-cols-2 gap-2">
+          {isLHU ? (
+            // Internal LHU: choose from supervisors (if available)
+            <FormItem>
+              <FormLabel>Chọn giảng viên (LHU)</FormLabel>
+              <FormControl>
+                <select
+                  className="input w-full rounded border px-2 py-1"
+                  onChange={(e) => {
+                    const id = e.target.value || null;
+                    if (!id) {
+                      form.setValue("manager_name", "");
+                      form.setValue("manager_phone", "");
+                      return;
+                    }
+                    const sup = supervisors?.find((s) => s.id === id);
+                    if (sup) {
+                      form.setValue(
+                        "manager_name",
+                        sup.full_name || sup.email || ""
+                      );
+                      form.setValue("manager_phone", sup.phone || "");
+                    }
+                  }}
+                >
+                  <option value="">-- Chọn giảng viên --</option>
+                  {supervisors &&
+                    supervisors.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.full_name || s.email}
+                      </option>
+                    ))}
+                </select>
+              </FormControl>
+            </FormItem>
+          ) : (
+            // External: allow optionally selecting a supervisor or entering name/phone
+            <>
+              <FormItem>
+                <FormLabel>Chọn giảng viên (nếu có)</FormLabel>
+                <FormControl>
+                  <select
+                    className="input w-full rounded border px-2 py-1"
+                    onChange={(e) => {
+                      const id = e.target.value || null;
+                      if (!id) return;
+                      const sup = supervisors?.find((s) => s.id === id);
+                      if (sup) {
+                        form.setValue(
+                          "manager_name",
+                          sup.full_name || sup.email || ""
+                        );
+                        form.setValue("manager_phone", sup.phone || "");
+                      }
+                    }}
+                  >
+                    <option value="">-- Không chọn --</option>
+                    {supervisors &&
+                      supervisors.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.full_name || s.email}
+                        </option>
+                      ))}
+                  </select>
+                </FormControl>
+              </FormItem>
+
+              <FormField
+                control={form.control}
+                name="manager_name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Người quản lý</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="manager_phone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>SĐT quản lý</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </>
+          )}
+        </div>
+
+        <div className="flex justify-end">
+          <Button type="submit">Lưu</Button>
+        </div>
+      </form>
+    </Form>
+  );
+}
 
 const positionSchema = z.object({
   id: z.string(),
@@ -82,7 +363,6 @@ export function AddCompanyForm({
   maxCount,
 }: AddCompanyFormProps) {
   const { toast } = useToast();
-  const firestore = useFirestore();
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -109,8 +389,6 @@ export function AddCompanyForm({
   const isLHU = useWatch({ control: form.control, name: "isLHU" });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    const companiesCollectionRef = collection(firestore, "internshipCompanies");
-
     const positionsToSave =
       values.positions?.map((p) => ({
         id: p.id || uuidv4(),
@@ -128,7 +406,6 @@ export function AddCompanyForm({
       description: values.description || "",
       isLHU: hideIsLHU ? false : values.isLHU,
       positions: positionsToSave,
-      createdAt: serverTimestamp(),
     };
 
     if (ownerSupervisorId) {
@@ -148,7 +425,27 @@ export function AddCompanyForm({
     }
 
     try {
-      await addDoc(companiesCollectionRef, companyData);
+      // Use backend API instead of Firestore
+      const payload: any = {
+        name: values.name,
+        address: values.address || "",
+        website: values.website || "",
+        description: values.description || "",
+        company_type: hideIsLHU
+          ? "external"
+          : values.isLHU
+          ? "lhu"
+          : "external",
+        is_active: true,
+      };
+
+      if (!(hideIsLHU ? false : values.isLHU)) {
+        payload.contact_person = values.contactName || "";
+        payload.email = values.contactEmail || "";
+        payload.contact_phone = values.contactPhone || "";
+      }
+
+      await companiesService.create(payload);
       toast({
         title: "Thành công",
         description: `Doanh nghiệp "${values.name}" đã được tạo.`,

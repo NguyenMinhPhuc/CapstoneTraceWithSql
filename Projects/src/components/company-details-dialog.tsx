@@ -22,7 +22,8 @@ interface CompanyDetailsDialogProps {
 }
 
 export function CompanyDetailsDialog({ company }: CompanyDetailsDialogProps) {
-  const positions = company.positions || [];
+  // Support both Firestore `InternshipCompany` shape and backend `Company` shape
+  const positions = (company as any).positions || [];
   const positionCount = positions.length;
   const totalCapacity = positions.reduce(
     (sum, p) => sum + (p.quantity || 0),
@@ -54,13 +55,13 @@ export function CompanyDetailsDialog({ company }: CompanyDetailsDialogProps) {
       <ScrollArea className="max-h-[70vh] pr-4">
         <div className="space-y-6 text-sm">
           <div className="grid gap-2 text-sm">
-            {company.address && (
+            {((company as any).address || (company as any).website) && (
               <div className="flex items-start gap-2">
                 <Building2 className="h-4 w-4 text-muted-foreground" />{" "}
-                <span>{company.address}</span>
+                <span>{(company as any).address || ""}</span>
               </div>
             )}
-            {company.website && (
+            {(company as any).website && (
               <div className="flex items-start gap-2">
                 <Globe className="h-4 w-4 text-muted-foreground" />{" "}
                 <a
@@ -69,30 +70,55 @@ export function CompanyDetailsDialog({ company }: CompanyDetailsDialogProps) {
                   rel="noopener noreferrer"
                   className="text-primary hover:underline"
                 >
-                  {company.website}
+                  {(company as any).website}
                 </a>
               </div>
             )}
-            {(company.contactName ||
-              company.contactEmail ||
-              company.contactPhone) && (
+            {((company as any).contact_person ||
+              (company as any).contactName ||
+              (company as any).email ||
+              (company as any).contact_phone) && (
               <div className="space-y-1">
-                {company.contactName && (
+                {((company as any).contact_person ||
+                  (company as any).contactName) && (
                   <div className="flex items-start gap-2">
                     <User className="h-4 w-4 text-muted-foreground" />{" "}
-                    <span>{company.contactName}</span>
+                    <span>
+                      {(company as any).contact_person ||
+                        (company as any).contactName}
+                    </span>
                   </div>
                 )}
-                {company.contactEmail && (
+                {(company as any).email && (
                   <div className="flex items-start gap-2">
                     <Mail className="h-4 w-4 text-muted-foreground" />{" "}
-                    <span>{company.contactEmail}</span>
+                    <span>{(company as any).email}</span>
                   </div>
                 )}
-                {company.contactPhone && (
+                {((company as any).contact_phone ||
+                  (company as any).manager_phone) && (
                   <div className="flex items-start gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />{" "}
-                    <span>{company.contactPhone}</span>
+                    <span>
+                      {(company as any).contact_phone ||
+                        (company as any).manager_phone}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Manager info (backend fields) */}
+            {((company as any).manager_name ||
+              (company as any).manager_phone) && (
+              <div className="space-y-1">
+                <div className="flex items-start gap-2">
+                  <User className="h-4 w-4 text-muted-foreground" />{" "}
+                  <span>{(company as any).manager_name || ""}</span>
+                </div>
+                {(company as any).manager_phone && (
+                  <div className="flex items-start gap-2">
+                    <Phone className="h-4 w-4 text-muted-foreground" />{" "}
+                    <span>{(company as any).manager_phone}</span>
                   </div>
                 )}
               </div>

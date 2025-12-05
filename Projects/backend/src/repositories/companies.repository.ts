@@ -7,11 +7,14 @@ export interface Company {
   address?: string;
   phone?: string;
   email?: string;
+  external_id?: string;
+  manager_name?: string;
+  manager_phone?: string;
   contact_person?: string;
   contact_phone?: string;
   website?: string;
   description?: string;
-  is_active: boolean;
+  company_type?: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -21,10 +24,14 @@ export interface CreateCompanyInput {
   address?: string;
   phone?: string;
   email?: string;
+  external_id?: string;
+  manager_name?: string;
+  manager_phone?: string;
   contact_person?: string;
   contact_phone?: string;
   website?: string;
   description?: string;
+  company_type?: string;
   is_active?: boolean;
 }
 
@@ -33,10 +40,10 @@ export interface UpdateCompanyInput extends Partial<CreateCompanyInput> {
 }
 
 export const companiesRepository = {
-  async getAll(is_active?: boolean): Promise<Company[]> {
+  async getAll(company_type?: string): Promise<Company[]> {
     const pool = getPool();
     const req = pool.request();
-    req.input("is_active", sql.Bit, is_active ?? null);
+    req.input("company_type", sql.NVarChar(50), company_type ?? null);
     const result = await req.execute("sp_GetAllCompanies");
     return result.recordset || [];
   },
@@ -49,20 +56,31 @@ export const companiesRepository = {
       .execute("sp_GetCompanyById");
     return result.recordset[0] || null;
   },
-
   async create(data: CreateCompanyInput): Promise<Company> {
     const pool = getPool();
     const result = await pool
       .request()
+      .input("external_id", sql.NVarChar(100), data.external_id ?? null)
       .input("name", sql.NVarChar(255), data.name)
       .input("address", sql.NVarChar(500), data.address ?? null)
       .input("phone", sql.NVarChar(20), data.phone ?? null)
       .input("email", sql.NVarChar(255), data.email ?? null)
-      .input("contact_person", sql.NVarChar(255), data.contact_person ?? null)
-      .input("contact_phone", sql.NVarChar(20), data.contact_phone ?? null)
+      .input(
+        "contact_person",
+        sql.NVarChar(255),
+        data.contact_person ?? data.manager_name ?? ""
+      )
+      .input(
+        "contact_phone",
+        sql.NVarChar(20),
+        data.contact_phone ?? data.manager_phone ?? null
+      )
       .input("website", sql.NVarChar(255), data.website ?? null)
       .input("description", sql.NVarChar(sql.MAX), data.description ?? null)
       .input("is_active", sql.Bit, data.is_active ?? true)
+      .input("company_type", sql.NVarChar(250), data.company_type ?? null)
+      .input("manager_name", sql.NVarChar(250), data.manager_name ?? null)
+      .input("manager_phone", sql.VarChar(50), data.manager_phone ?? null)
       .execute("sp_CreateCompany");
 
     return result.recordset[0];
@@ -77,11 +95,27 @@ export const companiesRepository = {
       .input("address", sql.NVarChar(500), data.address ?? null)
       .input("phone", sql.NVarChar(20), data.phone ?? null)
       .input("email", sql.NVarChar(255), data.email ?? null)
-      .input("contact_person", sql.NVarChar(255), data.contact_person ?? null)
-      .input("contact_phone", sql.NVarChar(20), data.contact_phone ?? null)
+      .input("manager_name", sql.NVarChar(250), data.manager_name ?? null)
+      .input("manager_phone", sql.VarChar(50), data.manager_phone ?? null)
+      .input(
+        "contact_person",
+        sql.NVarChar(255),
+        (data as any).contact_person ?? data.manager_name ?? ""
+      )
+      .input(
+        "contact_phone",
+        sql.NVarChar(20),
+        (data as any).contact_phone ?? data.manager_phone ?? null
+      )
       .input("website", sql.NVarChar(255), data.website ?? null)
       .input("description", sql.NVarChar(sql.MAX), data.description ?? null)
-      .input("is_active", sql.Bit, data.is_active ?? null)
+      .input("company_type", sql.NVarChar(250), data.company_type ?? null)
+      .input("is_active", sql.Bit, data.is_active ?? true)
+      .input(
+        "external_id",
+        sql.NVarChar(100),
+        (data as any).external_id ?? null
+      )
       .execute("sp_UpdateCompany");
 
     return result.recordset[0];
@@ -89,10 +123,7 @@ export const companiesRepository = {
 
   async delete(id: number): Promise<void> {
     const pool = getPool();
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .execute("sp_DeleteCompany");
+    await pool.request().input("id", sql.Int, id).execute("sp_DeleteCompany");
   },
 };
 

@@ -463,7 +463,7 @@ export function SupervisorManagementTable() {
               {filteredSupervisors.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={8}
+                    colSpan={9}
                     className="text-center text-muted-foreground"
                   >
                     Chưa có giảng viên nào

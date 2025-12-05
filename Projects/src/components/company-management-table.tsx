@@ -12,14 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogTrigger, DialogContent } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,19 +40,11 @@ import {
   FileDown,
   CheckCircle,
 } from "lucide-react";
-import {
-  useCollection,
-  useFirestore,
-  useMemoFirebase,
-  errorEmitter,
-  FirestorePermissionError,
-} from "@/firebase";
-import { collection, doc, deleteDoc, writeBatch } from "firebase/firestore";
-import type { InternshipCompany } from "@/lib/types";
+import { companiesService, type Company } from "@/services/companies.service";
 import { Skeleton } from "./ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "./ui/input";
-import { AddCompanyForm } from "./add-company-form";
+import { AddCompanyFormApi } from "./add-company-form";
 import { EditCompanyForm } from "./edit-company-form";
 import { CompanyDetailsDialog } from "./company-details-dialog";
 import { Checkbox } from "./ui/checkbox";
@@ -69,8 +54,9 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 
 export function CompanyManagementTable() {
-  const firestore = useFirestore();
   const { toast } = useToast();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -78,21 +64,30 @@ export function CompanyManagementTable() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isAssignToSessionDialogOpen, setIsAssignToSessionDialogOpen] =
     useState(false);
-  const [companyToDelete, setCompanyToDelete] =
-    useState<InternshipCompany | null>(null);
-  const [selectedCompany, setSelectedCompany] =
-    useState<InternshipCompany | null>(null);
+  const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
+  const [selectedRowIds, setSelectedRowIds] = useState<number[]>([]);
 
-  const companiesCollectionRef = useMemoFirebase(
-    () => collection(firestore, "internshipCompanies"),
-    [firestore]
-  );
+  const loadCompanies = async (q?: string) => {
+    try {
+      setIsLoading(true);
+      const data = await companiesService.getAll({ q: q || undefined });
+      setCompanies(data || []);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: err?.message || "Không thể tải công ty",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  const { data: companies, isLoading } = useCollection<InternshipCompany>(
-    companiesCollectionRef
-  );
+  useEffect(() => {
+    loadCompanies();
+  }, []);
 
   useEffect(() => {
     setSelectedRowIds([]);
@@ -100,13 +95,12 @@ export function CompanyManagementTable() {
 
   const filteredCompanies = useMemo(() => {
     if (!companies) return [];
-    return companies.filter((company) => {
-      const term = searchTerm.toLowerCase();
-      return (
+    const term = (searchTerm || "").toLowerCase();
+    return companies.filter(
+      (company) =>
         company.name.toLowerCase().includes(term) ||
         (company.address && company.address.toLowerCase().includes(term))
-      );
-    });
+    );
   }, [companies, searchTerm]);
   const {
     items: paginatedCompanies,
@@ -131,33 +125,31 @@ export function CompanyManagementTable() {
   };
 
   const confirmDelete = async () => {
-    const batch = writeBatch(firestore);
     let count = 0;
-
-    if (selectedRowIds.length > 0) {
-      selectedRowIds.forEach((id) => {
-        batch.delete(doc(firestore, "internshipCompanies", id));
-      });
-      count = selectedRowIds.length;
-    } else if (companyToDelete) {
-      batch.delete(doc(firestore, "internshipCompanies", companyToDelete.id));
-      count = 1;
-    }
-
-    if (count === 0) return;
-
     try {
-      await batch.commit();
+      if (selectedRowIds.length > 0) {
+        await Promise.all(
+          selectedRowIds.map((id) => companiesService.delete(id))
+        );
+        count = selectedRowIds.length;
+      } else if (companyToDelete) {
+        await companiesService.delete(companyToDelete.id);
+        count = 1;
+      }
+
+      if (count > 0) {
+        toast({
+          title: "Thành công",
+          description: `Đã xóa ${count} doanh nghiệp.`,
+        });
+        await loadCompanies();
+      }
+    } catch (error: any) {
       toast({
-        title: "Thành công",
-        description: `Đã xóa ${count} doanh nghiệp.`,
+        variant: "destructive",
+        title: "Lỗi",
+        description: error?.message || "Không thể xóa",
       });
-    } catch (error) {
-      const contextualError = new FirestorePermissionError({
-        path: "batch delete on internshipCompanies",
-        operation: "delete",
-      });
-      errorEmitter.emit("permission-error", contextualError);
     } finally {
       setIsDeleteDialogOpen(false);
       setCompanyToDelete(null);
@@ -173,7 +165,7 @@ export function CompanyManagementTable() {
     }
   };
 
-  const handleRowSelect = (id: string, checked: boolean) => {
+  const handleRowSelect = (id: number, checked: boolean) => {
     if (checked) {
       setSelectedRowIds((prev) => [...prev, id]);
     } else {
@@ -280,10 +272,11 @@ export function CompanyManagementTable() {
                         Gán vào đợt ({selectedRowIds.length})
                       </Button>
                     </DialogTrigger>
-                    <AssignCompaniesToSessionDialog
-                      companyIds={selectedRowIds}
-                      onFinished={handleDialogFinished}
-                    />
+                    <DialogContent className="sm:max-w-2xl">
+                      <AddCompanyFormApi
+                        onFinished={() => setIsAddDialogOpen(false)}
+                      />
+                    </DialogContent>
                   </Dialog>
                   <Button
                     variant="destructive"
@@ -341,7 +334,7 @@ export function CompanyManagementTable() {
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-2xl">
-                    <AddCompanyForm
+                    <AddCompanyFormApi
                       onFinished={() => setIsAddDialogOpen(false)}
                     />
                   </DialogContent>

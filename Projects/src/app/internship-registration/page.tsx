@@ -2,13 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import {
-  useUser,
-  useDoc,
-  useFirestore,
-  useMemoFirebase,
-  useCollection,
-} from "@/firebase";
+import { useUser, useDoc, useFirestore, useMemoFirebase } from "@/firebase";
 import {
   doc,
   collection,
@@ -17,6 +11,7 @@ import {
   getDocs,
   getDoc,
 } from "firebase/firestore";
+import { companiesService } from "@/services/companies.service";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Card,
@@ -48,6 +43,11 @@ export default function InternshipRegistrationPage() {
   const [sessionCompanies, setSessionCompanies] = useState<InternshipCompany[]>(
     []
   );
+  const [allCompanies, setAllCompanies] = useState<InternshipCompany[] | null>(
+    null
+  );
+  const [isLoadingAllCompanies, setIsLoadingAllCompanies] =
+    useState<boolean>(true);
   const [isLoading, setIsLoading] = useState(true);
 
   const userDocRef = useMemoFirebase(
@@ -57,12 +57,25 @@ export default function InternshipRegistrationPage() {
   const { data: userData, isLoading: isUserDataLoading } =
     useDoc<SystemUser>(userDocRef);
 
-  const allCompaniesCollectionRef = useMemoFirebase(
-    () => collection(firestore, "internshipCompanies"),
-    [firestore]
-  );
-  const { data: allCompanies, isLoading: isLoadingAllCompanies } =
-    useCollection<InternshipCompany>(allCompaniesCollectionRef);
+  // Load companies from backend (stored procedure getAllCompanies) instead of Firestore
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setIsLoadingAllCompanies(true);
+      try {
+        const list = await companiesService.getAll();
+        if (mounted) setAllCompanies(list || []);
+      } catch (err) {
+        console.error("Failed to load companies from backend:", err);
+        if (mounted) setAllCompanies([]);
+      } finally {
+        if (mounted) setIsLoadingAllCompanies(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const earlyInternshipQuery = useMemoFirebase(
     () =>
@@ -139,13 +152,13 @@ export default function InternshipRegistrationPage() {
         setActiveRegistration(null); // Explicitly set to null if no registration found
       }
 
-      // Filter all companies to get only the ones for the current session
+      // Filter all companies (from backend) to get only the ones for the current session
       // If no companyIds configured, default to showing all companies to avoid empty lists
       if (allCompanies) {
         if (sessionData.companyIds && sessionData.companyIds.length > 0) {
-          const companyIdSet = new Set(sessionData.companyIds);
+          const companyIdSet = new Set(sessionData.companyIds.map(String));
           const companiesForSession = allCompanies.filter((company) =>
-            companyIdSet.has(company.id)
+            companyIdSet.has(String(company.id))
           );
           setSessionCompanies(companiesForSession);
         } else {

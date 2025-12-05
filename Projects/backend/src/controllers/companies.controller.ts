@@ -1,17 +1,12 @@
 import { Request, Response } from "express";
-import { companiesRepository } from "../repositories/companies.repository";
-import { asyncHandler, AppError } from "../middleware/errorHandler";
 import { StatusCodes } from "http-status-codes";
+import { asyncHandler, AppError } from "../middleware/errorHandler";
+import companiesRepository from "../repositories/companies.repository";
 
-export const companiesController = {
+const companiesController = {
   getAll: asyncHandler(async (req: Request, res: Response) => {
-    const { is_active } = req.query as { is_active?: string };
-    let active: boolean | undefined = undefined;
-    if (is_active !== undefined) {
-      if (is_active === "true" || is_active === "1") active = true;
-      else if (is_active === "false" || is_active === "0") active = false;
-    }
-    const companies = await companiesRepository.getAll(active as any);
+    const { company_type } = req.query as { company_type?: string };
+    const companies = await companiesRepository.getAll(company_type as any);
     res.status(StatusCodes.OK).json({ success: true, data: companies });
   }),
 
@@ -29,10 +24,14 @@ export const companiesController = {
       address,
       phone,
       email,
+      external_id,
+      manager_name,
+      manager_phone,
       contact_person,
       contact_phone,
       website,
       description,
+      company_type,
       is_active,
     } = req.body;
 
@@ -43,10 +42,14 @@ export const companiesController = {
       address,
       phone,
       email,
+      external_id,
+      manager_name,
+      manager_phone,
       contact_person,
       contact_phone,
       website,
       description,
+      company_type,
       is_active,
     });
 

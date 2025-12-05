@@ -2,36 +2,43 @@ import apiClient from "@/lib/api-client";
 
 export interface Company {
   id: number;
+  external_id?: string;
   name: string;
-  address?: string;
+  description?: string;
+  website?: string;
   phone?: string;
   email?: string;
+  address?: string;
   contact_person?: string;
   contact_phone?: string;
-  website?: string;
-  description?: string;
+  manager_name?: string;
+  manager_phone?: string;
+  company_type?: string;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }
 
 export interface CreateCompanyInput {
+  external_id?: string;
   name: string;
-  address?: string;
+  description?: string;
+  website?: string;
   phone?: string;
   email?: string;
+  address?: string;
   contact_person?: string;
   contact_phone?: string;
-  website?: string;
-  description?: string;
+  manager_name?: string;
+  manager_phone?: string;
+  company_type?: string;
   is_active?: boolean;
 }
 
 export const companiesService = {
-  async getAll(filters?: { is_active?: boolean }): Promise<Company[]> {
-    const params: any = {};
-    if (filters && filters.is_active !== undefined)
-      params.is_active = filters.is_active;
+  async getAll(
+    params?: { company_type?: string; q?: string } | { is_active?: boolean }
+  ): Promise<Company[]> {
     const resp = await apiClient.get("/companies", { params });
     return resp.data.data || [];
   },

@@ -69,10 +69,11 @@ BEGIN
   FROM student_profiles
   WHERE student_id = @student_id)
   BEGIN
-  THROW 50020, 'Student profile not found', 1;
-END
+    RAISERROR('Student profile not found', 16, 1);
+    RETURN;
+  END
 
-UPDATE student_profiles
+  UPDATE student_profiles
   SET contact_info = ISNULL(@contact_info, contact_info),
       guardian_info = ISNULL(@guardian_info, guardian_info),
       residency_type = ISNULL(@residency_type, residency_type),
@@ -87,9 +88,9 @@ UPDATE student_profiles
       updated_at = GETDATE()
   WHERE student_id = @student_id;
 
-SELECT *
-FROM student_profiles
-WHERE student_id = @student_id;
+  SELECT *
+  FROM student_profiles
+  WHERE student_id = @student_id;
 END;
 GO
 
@@ -105,8 +106,9 @@ BEGIN
   FROM student_profiles
   WHERE student_id = @student_id)
   BEGIN
-  THROW 50021, 'Student profile not found', 1;
-END
-DELETE FROM student_profiles WHERE student_id = @student_id;
+    RAISERROR('Student profile not found', 16, 1);
+    RETURN;
+  END
+  DELETE FROM student_profiles WHERE student_id = @student_id;
 END;
 GO
