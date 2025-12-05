@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "Conversation": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Conversation",
+      "type": "object",
+      "description": "Represents a single Q&A thread.",
+      "properties": {
+        "id": { "type": "string" },
+        "subject": { "type": "string" },
+        "participantIds": { "type": "array", "items": { "type": "string" }},
+        "participantNames": { "type": "array", "items": { "type": "string" }},
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "lastMessageSnippet": { "type": "string" },
+        "readBy": { "type": "array", "items": { "type": "string" }}
+      },
+      "required": ["id", "subject", "participantIds", "createdAt", "lastMessageAt"]
+    },
+    "Message": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Message",
+      "type": "object",
+      "description": "Represents a single message within a conversation.",
+      "properties": {
+        "id": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "mentionedUserIds": { "type": "array", "items": { "type": "string" }}
+      },
+      "required": ["id", "conversationId", "senderId", "senderName", "content", "createdAt"]
+    },
+    "Resource": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Resource",
+      "type": "object",
+      "description": "Represents a single educational resource like a form or template.",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "summary": { "type": "string" },
+        "category": { "type": "string", "enum": ["graduation", "internship"] },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string", "format": "uri" }
+            },
+            "required": ["label", "url"]
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "category", "links", "createdAt"]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "/conversations/{conversationId}": {
+      "schema": {
+        "$ref": "#/entities/Conversation"
+      },
+      "description": "Stores conversation metadata."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": {
+        "$ref": "#/entities/Message"
+      },
+      "description": "Stores messages for a conversation."
+    },
+    "/resources/{resourceId}": {
+      "schema": {
+        "$ref": "#/entities/Resource"
+      },
+      "description": "Stores educational resources."
+    }
+  }
+}
