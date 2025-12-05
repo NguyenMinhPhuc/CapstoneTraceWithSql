@@ -240,7 +240,9 @@ CREATE OR ALTER PROCEDURE sp_UpdateStudent
   @address NVARCHAR(MAX) = NULL,
   @class_id INT = NULL,
   @avatar_url NVARCHAR(MAX) = NULL,
-  @status NVARCHAR(50) = N'Đang học'
+  @status NVARCHAR(50) = N'Đang học',
+  @changed_by NVARCHAR(50) = NULL,
+  @change_notes NVARCHAR(MAX) = NULL
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -279,6 +281,12 @@ THROW 50004, 'Invalid status value', 1;
 RETURN;
 END
 
+-- Get old status before update
+DECLARE @old_status NVARCHAR(50);
+SELECT @old_status = status
+FROM students
+WHERE id = @id;
+
 UPDATE students
     SET 
         student_code = @student_code,
@@ -293,6 +301,15 @@ UPDATE students
         status = @status,
         updated_at = GETDATE()
     WHERE id = @id;
+
+-- Log status change if status changed and changed_by is provided
+IF @old_status != @status AND @changed_by IS NOT NULL
+    BEGIN
+  INSERT INTO profile_status_history
+    (student_id, old_status, new_status, changed_by, notes, change_type)
+  VALUES
+    (@id, @old_status, @status, @changed_by, @change_notes, 'status_change');
+END
 
 -- Return the updated student
 EXEC sp_GetStudentById @id;

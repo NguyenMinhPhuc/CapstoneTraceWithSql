@@ -17,6 +17,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -31,6 +42,7 @@ import {
   ArrowUp,
   ArrowDown,
   Download,
+  History,
 } from "lucide-react";
 import { studentsService, type Student } from "@/services/students.service";
 import { AddStudentForm } from "./add-student-form-backend";
@@ -40,6 +52,8 @@ import { TransferClassForm } from "./transfer-class-form";
 import { SearchableSelect } from "./searchable-select";
 import { Skeleton } from "./ui/skeleton";
 import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
+import { StudentStatusHistoryDialog } from "./student-status-history-dialog";
 import * as XLSX from "xlsx";
 import {
   Select,
@@ -54,8 +68,11 @@ import {
   departmentsService,
   type Department,
 } from "@/services/departments.service";
-
 export function StudentManagementTable() {
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [majors, setMajors] = useState<Major[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+
   const [students, setStudents] = useState<Student[]>([]);
   const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +83,18 @@ export function StudentManagementTable() {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [selectedStudentForTransfer, setSelectedStudentForTransfer] =
     useState<Student | null>(null);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [notesDialogOpen, setNotesDialogOpen] = useState(false);
+  const [pendingStatusChange, setPendingStatusChange] = useState<{
+    studentId: number;
+    newStatus: string;
+    oldStatus: string;
+  } | null>(null);
+  const [statusChangeNotes, setStatusChangeNotes] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [classFilter, setClassFilter] = useState<string>("all");
   const [majorFilter, setMajorFilter] = useState<string>("all");
@@ -75,10 +104,54 @@ export function StudentManagementTable() {
   const [pageSize, setPageSize] = useState(10);
   const [sortBy, setSortBy] = useState<string>("student_code");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
 
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [majors, setMajors] = useState<Major[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const colors = [
+    { bg: "#EEF2FF", accent: "#4F46E5" },
+    { bg: "#ECFDF5", accent: "#059669" },
+    { bg: "#FFF7ED", accent: "#D97706" },
+    { bg: "#FEF2F2", accent: "#DC2626" },
+    { bg: "#EFF6FF", accent: "#0369A1" },
+    { bg: "#F5F3FF", accent: "#7C3AED" },
+  ];
+
+  const [majorDetailOpen, setMajorDetailOpen] = useState(false);
+  const [majorDetailName, setMajorDetailName] = useState<string | null>(null);
+  const [majorDetailRows, setMajorDetailRows] = useState<Student[]>([]);
+  const [majorDetailLoading, setMajorDetailLoading] = useState(false);
+
+  const openMajorDetail = (majorName: string) => {
+    setMajorDetailName(majorName);
+    setMajorDetailOpen(true);
+    setMajorDetailLoading(true);
+    try {
+      const rows = students.filter(
+        (s) => s.major_name === majorName || s.major_name === (majorName as any)
+      );
+      setMajorDetailRows(rows);
+    } catch (e) {
+      console.error("Failed to load major detail", e);
+      setMajorDetailRows([]);
+    } finally {
+      setMajorDetailLoading(false);
+    }
+  };
+
+  const exportMajorDetailXlsx = () => {
+    if (!majorDetailName) return;
+    const data = majorDetailRows.map((r) => ({
+      id: r.id,
+      student_code: (r as any).student_code || (r as any).studentId || "",
+      full_name: (r as any).full_name || (r as any).firstName || "",
+      class_name: (r as any).class_name || (r as any).class || "",
+      status: r.status || "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Students");
+    const fileName = `${majorDetailName}_students.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
 
   const { toast } = useToast();
 
@@ -189,6 +262,37 @@ export function StudentManagementTable() {
       return;
     }
 
+    const student = students.find((s) => s.id === studentId);
+    if (!student) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không tìm thấy sinh viên",
+      });
+      return;
+    }
+
+    // Nếu trạng thái không thay đổi, bỏ qua
+    if (student.status === newStatus) {
+      console.log("Status unchanged, skipping...");
+      return;
+    }
+
+    // Mở dialog nhập ghi chú
+    setPendingStatusChange({
+      studentId,
+      newStatus,
+      oldStatus: student.status,
+    });
+    setStatusChangeNotes("");
+    setNotesDialogOpen(true);
+  };
+
+  const confirmStatusChange = async () => {
+    if (!pendingStatusChange) return;
+
+    const { studentId, newStatus } = pendingStatusChange;
+
     try {
       const student = students.find((s) => s.id === studentId);
       if (!student) {
@@ -200,13 +304,8 @@ export function StudentManagementTable() {
         return;
       }
 
-      // Nếu trạng thái không thay đổi, bỏ qua
-      if (student.status === newStatus) {
-        console.log("Status unchanged, skipping...");
-        return;
-      }
-
       setIsUpdating(true);
+      setNotesDialogOpen(false);
 
       const updateData = {
         student_code: student.student_code,
@@ -219,6 +318,7 @@ export function StudentManagementTable() {
         class_id: student.class_id,
         avatar_url: student.avatar_url,
         status: newStatus,
+        change_notes: statusChangeNotes || undefined,
       };
 
       console.log("Updating student:", studentId, updateData);
@@ -395,6 +495,205 @@ export function StudentManagementTable() {
           </Button>
         </div>
       </div>
+
+      <Collapsible open={isStatsOpen} onOpenChange={setIsStatsOpen}>
+        <CollapsibleTrigger asChild>
+          <button className="flex items-center gap-2 text-lg font-semibold w-full">
+            {isStatsOpen ? (
+              <ArrowUp className="h-5 w-5" />
+            ) : (
+              <ArrowDown className="h-5 w-5" />
+            )}
+            Thống kê
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-4 pt-4">
+          {isStatsOpen && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
+              {/* Total card */}
+              {(() => {
+                const c = colors[0];
+                const total = students.length;
+                return (
+                  <div
+                    className="p-4 rounded border flex flex-col"
+                    style={{
+                      backgroundColor: c.bg,
+                      borderLeft: `4px solid ${c.accent}`,
+                    }}
+                  >
+                    <div className="text-sm text-muted-foreground">
+                      Tổng sinh viên
+                    </div>
+                    <div
+                      className="text-3xl font-extrabold mt-1"
+                      style={{ color: c.accent }}
+                    >
+                      {total}
+                    </div>
+                    <div className="mt-3 text-sm max-h-36 overflow-auto">
+                      <ul className="space-y-1">
+                        {majors.map((mj) => {
+                          const majCount = students.filter(
+                            (s) => s.major_id === mj.id
+                          ).length;
+                          const pct = total
+                            ? ((majCount / total) * 100).toFixed(1)
+                            : "0.0";
+                          return (
+                            <li
+                              key={mj.id}
+                              className="flex items-center justify-between"
+                            >
+                              <span className="truncate">{mj.name}</span>
+                              <span className="text-muted-foreground">
+                                <span className="font-medium">{majCount}</span>{" "}
+                                <span className="ml-2 text-xs">· {pct}%</span>
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                    {/* overall status breakdown for total card */}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(() => {
+                        const statuses = [
+                          "Đang học",
+                          "Bảo lưu",
+                          "Nghỉ học",
+                          "Nghỉ học TS",
+                          "Đã tốt nghiệp",
+                        ];
+                        return statuses.map((st) => {
+                          const cnt = students.filter(
+                            (s) => (s.status || "") === st
+                          ).length;
+                          const variant =
+                            st === "Đang học"
+                              ? "default"
+                              : st === "Bảo lưu"
+                              ? "secondary"
+                              : st === "Nghỉ học"
+                              ? "destructive"
+                              : st === "Đã tốt nghiệp"
+                              ? ""
+                              : "outline";
+                          return (
+                            <div
+                              key={st}
+                              className="flex items-center gap-2 text-sm"
+                            >
+                              <Badge variant={variant as any}>{st}</Badge>
+                              <span className="font-medium">{cnt}</span>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Per-major cards */}
+              {majors.map((mj, idx) => {
+                const color = colors[(idx + 1) % colors.length];
+                const majCount = students.filter(
+                  (s) => s.major_id === mj.id
+                ).length;
+                const total = students.length;
+                const pct = total
+                  ? ((majCount / total) * 100).toFixed(1)
+                  : "0.0";
+                const statusColors: Record<string, string> = {
+                  "Đang học": "#059669",
+                  "Bảo lưu": "#f59e0b",
+                  "Nghỉ học": "#dc2626",
+                  "Nghỉ học TS": "#6b7280",
+                  "Đã tốt nghiệp": "#2563eb",
+                };
+
+                return (
+                  <div
+                    key={mj.id}
+                    className="p-4 rounded border flex flex-col justify-between"
+                    style={{
+                      backgroundColor: color.bg,
+                      borderLeft: `4px solid ${color.accent}`,
+                    }}
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-slate-800">
+                        {mj.name}
+                      </div>
+
+                      <div className="mt-1 flex items-baseline gap-3">
+                        <div
+                          className="text-3xl font-extrabold"
+                          style={{ color: color.accent }}
+                        >
+                          {majCount}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          ({pct}%)
+                        </div>
+                      </div>
+
+                      <div className="mt-3 space-y-2">
+                        {(() => {
+                          const statuses = [
+                            "Đang học",
+                            "Bảo lưu",
+                            "Nghỉ học",
+                            "Nghỉ học TS",
+                            "Đã tốt nghiệp",
+                          ];
+                          return statuses.map((st) => {
+                            const cnt = students.filter(
+                              (s) =>
+                                s.major_id === mj.id && (s.status || "") === st
+                            ).length;
+                            const pctLocal = majCount
+                              ? ((cnt / majCount) * 100).toFixed(1)
+                              : "0.0";
+                            const dotColor = statusColors[st] || "#10b981";
+                            return (
+                              <div
+                                key={st}
+                                className="flex items-center gap-2 text-sm whitespace-nowrap"
+                              >
+                                <span
+                                  className="w-3 h-3 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: dotColor }}
+                                />
+                                <span className="font-medium">{st}:</span>
+                                <span className="font-semibold">{cnt}</span>
+                                <span className="text-muted-foreground text-xs">
+                                  ({pctLocal}%)
+                                </span>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      <Button
+                        className="bg-violet-700 text-white hover:bg-violet-600"
+                        size="sm"
+                        onClick={() => openMajorDetail(mj.name)}
+                      >
+                        Xem chi tiết
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -656,9 +955,7 @@ export function StudentManagementTable() {
                           </SelectItem>
                           <SelectItem value="Nghỉ học khi tuyển sinh">
                             <div className="flex items-center gap-2">
-                              <Badge variant="outline">
-                                Nghỉ học khi tuyển sinh
-                              </Badge>
+                              <Badge variant="outline">Nghỉ học TS</Badge>
                             </div>
                           </SelectItem>
                           <SelectItem value="Đã tốt nghiệp">
@@ -673,6 +970,20 @@ export function StudentManagementTable() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedStudentForHistory({
+                              id: student.id,
+                              name: student.full_name,
+                            });
+                            setHistoryDialogOpen(true);
+                          }}
+                          title="Xem lịch sử"
+                        >
+                          <History className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -826,6 +1137,52 @@ export function StudentManagementTable() {
         </DialogContent>
       </Dialog>
 
+      {/* Major detail dialog */}
+      <Dialog open={majorDetailOpen} onOpenChange={setMajorDetailOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              Danh sách sinh viên{" "}
+              {majorDetailName ? `- ${majorDetailName}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {majorDetailLoading
+                ? "Đang tải..."
+                : `${majorDetailRows.length} sinh viên`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mb-2 flex justify-end gap-2">
+            <Button onClick={exportMajorDetailXlsx}>Xuất Excel (.xlsx)</Button>
+          </div>
+
+          <div className="overflow-auto max-h-72">
+            <table className="w-full table-auto">
+              <thead>
+                <tr>
+                  <th className="text-left p-2">#</th>
+                  <th className="text-left p-2">MSSV</th>
+                  <th className="text-left p-2">Họ và tên</th>
+                  <th className="text-left p-2">Lớp</th>
+                  <th className="text-left p-2">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody>
+                {majorDetailRows.map((s, idx) => (
+                  <tr key={s.id || idx} className="border-t">
+                    <td className="p-2">{idx + 1}</td>
+                    <td className="p-2">{s.student_code}</td>
+                    <td className="p-2">{s.full_name}</td>
+                    <td className="p-2">{s.class_name || "-"}</td>
+                    <td className="p-2">{s.status || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
         <DialogContent className="max-w-2xl">
@@ -865,6 +1222,61 @@ export function StudentManagementTable() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Status Change Notes Dialog */}
+      <Dialog open={notesDialogOpen} onOpenChange={setNotesDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Ghi chú thay đổi trạng thái</DialogTitle>
+            <DialogDescription>
+              {pendingStatusChange && (
+                <span>
+                  Thay đổi từ <strong>{pendingStatusChange.oldStatus}</strong> →{" "}
+                  <strong>{pendingStatusChange.newStatus}</strong>
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Ghi chú (tùy chọn)</label>
+              <Textarea
+                value={statusChangeNotes}
+                onChange={(e) => setStatusChangeNotes(e.target.value)}
+                placeholder="VD: Sinh viên xin bảo lưu do vấn đề sức khỏe"
+                rows={4}
+                className="mt-2"
+              />
+              <p className="text-sm text-muted-foreground mt-2">
+                Ghi chú sẽ được lưu vào lịch sử thay đổi trạng thái
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setNotesDialogOpen(false);
+                  setPendingStatusChange(null);
+                  setStatusChangeNotes("");
+                }}
+              >
+                Hủy
+              </Button>
+              <Button onClick={confirmStatusChange}>Xác nhận</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Status History Dialog */}
+      {selectedStudentForHistory && (
+        <StudentStatusHistoryDialog
+          studentId={selectedStudentForHistory.id}
+          studentName={selectedStudentForHistory.name}
+          open={historyDialogOpen}
+          onOpenChange={setHistoryDialogOpen}
+        />
+      )}
     </div>
   );
 }

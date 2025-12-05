@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
+import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import swaggerUi from "swagger-ui-express";
 import { connectDatabase } from "./database/connection";
@@ -26,6 +27,7 @@ import studentsRoutes from "./routes/students.routes";
 import supervisorRoutes from "./routes/supervisor.routes";
 import companiesRoutes from "./routes/companies.routes";
 import studentProfilesRoutes from "./routes/studentProfiles.routes";
+import classAdvisorsRoutes from "./routes/classAdvisors.routes";
 // import userRoutes from "./routes/user.routes";
 // import topicRoutes from "./routes/topic.routes";
 // import companyRoutes from "./routes/company.routes";
@@ -56,10 +58,23 @@ app.use(
 );
 
 // Rate limiting
+// Prefer per-user key when JWT present (reduces 429s for many users behind same IP)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000"),
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "100"),
-  message: "Too many requests from this IP, please try again later.",
+  message: "Too many requests, please try again later.",
+  keyGenerator: (req) => {
+    try {
+      const auth = req.headers.authorization?.replace("Bearer ", "");
+      if (auth) {
+        const decoded = jwt.decode(auth) as any;
+        if (decoded && decoded.id) return String(decoded.id);
+      }
+    } catch (e) {
+      // fall back to IP
+    }
+    return req.ip;
+  },
 });
 app.use("/api", limiter);
 
@@ -125,6 +140,7 @@ app.use("/api/students", studentsRoutes);
 app.use("/api/supervisors", supervisorRoutes);
 app.use("/api/companies", companiesRoutes);
 app.use("/api/student-profiles", studentProfilesRoutes);
+app.use("/api/class-advisors", classAdvisorsRoutes);
 // app.use("/api/users", userRoutes);
 // app.use("/api/topics", topicRoutes);
 // app.use("/api/companies", companyRoutes);

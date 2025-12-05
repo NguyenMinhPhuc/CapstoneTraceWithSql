@@ -1,8 +1,8 @@
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { StatusCodes } from 'http-status-codes';
-import { AppError } from './errorHandler';
-import { getPool } from '../database/connection';
+import { Request, Response, NextFunction } from "express";
+import jwt from "jsonwebtoken";
+import { StatusCodes } from "http-status-codes";
+import { AppError } from "./errorHandler";
+import { getPool } from "../database/connection";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -18,10 +18,10 @@ export const authenticate = async (
   next: NextFunction
 ) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const token = req.headers.authorization?.replace("Bearer ", "");
 
     if (!token) {
-      throw new AppError('No token provided', StatusCodes.UNAUTHORIZED);
+      throw new AppError("No token provided", StatusCodes.UNAUTHORIZED);
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
@@ -34,29 +34,29 @@ export const authenticate = async (
     const pool = getPool();
     const result = await pool
       .request()
-      .input('userId', decoded.id)
-      .query('SELECT id, email, role, is_active FROM users WHERE id = @userId');
+      .input("userId", decoded.id)
+      .query("SELECT id, email, role, is_active FROM users WHERE id = @userId");
 
     if (result.recordset.length === 0) {
-      throw new AppError('User not found', StatusCodes.UNAUTHORIZED);
+      throw new AppError("User not found", StatusCodes.UNAUTHORIZED);
     }
 
     const user = result.recordset[0];
 
     if (!user.is_active) {
-      throw new AppError('User account is disabled', StatusCodes.UNAUTHORIZED);
+      throw new AppError("User account is disabled", StatusCodes.UNAUTHORIZED);
     }
 
     req.user = {
       id: user.id,
       email: user.email,
-      role: user.role,
+      role: String(user.role || "").toLowerCase(),
     };
 
     next();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
-      return next(new AppError('Invalid token', StatusCodes.UNAUTHORIZED));
+      return next(new AppError("Invalid token", StatusCodes.UNAUTHORIZED));
     }
     next(error);
   }
@@ -65,12 +65,20 @@ export const authenticate = async (
 export const authorize = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return next(new AppError('Authentication required', StatusCodes.UNAUTHORIZED));
+      return next(
+        new AppError("Authentication required", StatusCodes.UNAUTHORIZED)
+      );
     }
 
-    if (!roles.includes(req.user.role)) {
+    const allowed = roles.map((r) => String(r).toLowerCase());
+    const userRole = String(req.user.role || "").toLowerCase();
+
+    if (!allowed.includes(userRole)) {
       return next(
-        new AppError('You do not have permission to perform this action', StatusCodes.FORBIDDEN)
+        new AppError(
+          "You do not have permission to perform this action",
+          StatusCodes.FORBIDDEN
+        )
       );
     }
 

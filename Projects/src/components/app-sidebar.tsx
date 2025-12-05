@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/contexts/auth-context";
 import {
   Sidebar,
   SidebarHeader,
@@ -42,7 +43,6 @@ import {
   MessageSquare,
   Library,
 } from "lucide-react";
-import { useAuth } from "@/contexts/auth-context";
 import { Skeleton } from "./ui/skeleton";
 import {
   Collapsible,
@@ -151,6 +151,25 @@ export function AppSidebar() {
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
+
+          {/* Quick access for supervisors/teachers to their advisor management */}
+          {user &&
+            (user.role === "supervisor" ||
+              user.role === "admin" ||
+              user.role === "manager") && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={isActive("/teacher/class-advisors")}
+                  tooltip="Cố vấn của tôi"
+                >
+                  <Link href="/teacher/class-advisors">
+                    <UserCheck />
+                    <span>Cố vấn của tôi</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
 
           {user?.role === "student" && (
             <>
@@ -634,6 +653,19 @@ export function AppSidebar() {
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive("/admin/class-advisors")}
+                          tooltip="Quản lý cố vấn học tập"
+                        >
+                          <Link href="/admin/class-advisors">
+                            <UserCheck />
+                            <span>Quản lý cố vấn học tập</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+
                       <SidebarMenuItem>
                         <SidebarMenuButton
                           asChild

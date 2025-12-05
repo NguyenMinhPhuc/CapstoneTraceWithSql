@@ -209,6 +209,55 @@ export function StudentManagementTable() {
     return Array.from(majorSet).sort();
   }, [students]);
 
+  const colors = [
+    { bg: "#EEF2FF", accent: "#4F46E5" }, // indigo
+    { bg: "#ECFDF5", accent: "#059669" }, // emerald
+    { bg: "#FFF7ED", accent: "#D97706" }, // amber
+    { bg: "#FEF2F2", accent: "#DC2626" }, // red (rose)
+    { bg: "#EFF6FF", accent: "#0369A1" }, // sky
+    { bg: "#F5F3FF", accent: "#7C3AED" }, // violet
+  ];
+
+  // Major detail dialog state
+  const [majorDetailOpen, setMajorDetailOpen] = useState(false);
+  const [majorDetailName, setMajorDetailName] = useState<string | null>(null);
+  const [majorDetailRows, setMajorDetailRows] = useState<Student[]>([]);
+  const [majorDetailLoading, setMajorDetailLoading] = useState(false);
+
+  const openMajorDetail = (majorName: string) => {
+    setMajorDetailName(majorName);
+    setMajorDetailOpen(true);
+    setMajorDetailLoading(true);
+    try {
+      const rows = students?.filter((s) => s.major === majorName) || [];
+      setMajorDetailRows(rows);
+    } catch (e) {
+      console.error("Failed to load major detail", e);
+      setMajorDetailRows([]);
+    } finally {
+      setMajorDetailLoading(false);
+    }
+  };
+
+  const exportMajorDetailXlsx = () => {
+    if (!majorDetailName) return;
+    const data = majorDetailRows.map((r) => ({
+      id: r.id,
+      student_code: r.studentId || r.studentId || "",
+      full_name: r.fullName || r.full_name || "",
+      class_name: r.className || r.class_name || "",
+      status: r.status || "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Students");
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wbout], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    saveAs(blob, `${majorDetailName}_students.xlsx`);
+  };
+
   const uniqueCourses = useMemo(() => {
     if (!students) return [];
     const courseSet = new Set<string>();
@@ -651,6 +700,97 @@ export function StudentManagementTable() {
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-4 pt-4">
+          {/* Top-level stat cards for student management */}
+          {isStatsOpen && (
+            <div className="mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+                {/* Total card */}
+                {(() => {
+                  const c = colors[0];
+                  const total = students ? students.length : 0;
+                  return (
+                    <div
+                      className="p-4 rounded border flex flex-col"
+                      style={{
+                        backgroundColor: c.bg,
+                        borderLeft: `4px solid ${c.accent}`,
+                      }}
+                    >
+                      <div className="text-sm text-muted-foreground">
+                        Tổng sinh viên
+                      </div>
+                      <div
+                        className="text-3xl font-extrabold mt-1"
+                        style={{ color: c.accent }}
+                      >
+                        {total}
+                      </div>
+                      <div className="mt-3 text-sm max-h-36 overflow-auto">
+                        <ul className="space-y-1">
+                          {uniqueMajors.map((mj) => {
+                            const majCount =
+                              students?.filter((s) => s.major === mj).length ||
+                              0;
+                            const pct = total
+                              ? ((majCount / total) * 100).toFixed(1)
+                              : "0.0";
+                            return (
+                              <li
+                                key={mj}
+                                className="flex items-center justify-between"
+                              >
+                                <span className="truncate">{mj}</span>
+                                <span className="text-muted-foreground">
+                                  <span className="font-medium">
+                                    {majCount}
+                                  </span>{" "}
+                                  <span className="ml-2 text-xs">· {pct}%</span>
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Per-major cards */}
+                {uniqueMajors.map((mj, idx) => {
+                  const color = colors[(idx + 1) % colors.length];
+                  const majCount =
+                    students?.filter((s) => s.major === mj).length || 0;
+                  const total = students ? students.length : 0;
+                  const pct = total
+                    ? ((majCount / total) * 100).toFixed(1)
+                    : "0.0";
+                  return (
+                    <div
+                      key={mj}
+                      className="p-4 rounded border flex flex-col"
+                      style={{
+                        backgroundColor: color.bg,
+                        borderLeft: `4px solid ${color.accent}`,
+                      }}
+                    >
+                      <div className="text-sm text-muted-foreground">{mj}</div>
+                      <div
+                        className="text-xl font-semibold mt-1"
+                        style={{ color: color.accent }}
+                      >
+                        {majCount} ({pct}%)
+                      </div>
+                      <div className="mt-3">
+                        <Button size="sm" onClick={() => openMajorDetail(mj)}>
+                          Xem chi tiết
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {isStatsOpen &&
             (classStatsByCourse && classStatsByCourse.length > 0 ? (
               classStatsByCourse.map((courseGroup) => (
@@ -1540,6 +1680,58 @@ export function StudentManagementTable() {
           students={statusDetailData.students}
           onFinished={() => setIsStatusDetailOpen(false)}
         />
+      </Dialog>
+
+      <Dialog open={majorDetailOpen} onOpenChange={setMajorDetailOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              Danh sách sinh viên{" "}
+              {majorDetailName ? `- ${majorDetailName}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {majorDetailLoading
+                ? "Đang tải..."
+                : `${majorDetailRows.length} sinh viên`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mb-2 flex justify-end gap-2">
+            <Button onClick={exportMajorDetailXlsx}>Xuất Excel (.xlsx)</Button>
+          </div>
+
+          <div className="overflow-auto max-h-72">
+            <table className="w-full table-auto">
+              <thead>
+                <tr>
+                  <th className="text-left p-2">#</th>
+                  <th className="text-left p-2">MSSV</th>
+                  <th className="text-left p-2">Họ và tên</th>
+                  <th className="text-left p-2">Lớp</th>
+                  <th className="text-left p-2">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody>
+                {majorDetailRows.map((s, idx) => (
+                  <tr key={s.id || idx} className="border-t">
+                    <td className="p-2">{idx + 1}</td>
+                    <td className="p-2">
+                      {(s as any).studentId || (s as any).studentId}
+                    </td>
+                    <td className="p-2">
+                      {(s as any).firstName
+                        ? `${(s as any).firstName} ${(s as any).lastName || ""}`
+                        : (s as any).full_name || ""}
+                    </td>
+                    <td className="p-2">
+                      {(s as any).className || (s as any).class_name || "-"}
+                    </td>
+                    <td className="p-2">{(s as any).status || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
       </Dialog>
     </div>
   );

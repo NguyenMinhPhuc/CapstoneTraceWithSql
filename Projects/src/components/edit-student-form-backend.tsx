@@ -14,6 +14,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -36,6 +37,7 @@ const studentSchema = z.object({
   class_id: z.number().optional(),
   avatar_url: z.string().optional(),
   status: z.string().default("Đang học"),
+  change_notes: z.string().optional(),
 });
 
 type StudentFormData = z.infer<typeof studentSchema>;
@@ -63,6 +65,7 @@ export function EditStudentForm({ student, onFinished }: EditStudentFormProps) {
       class_id: student.class_id,
       avatar_url: student.avatar_url || "",
       status: student.status || "Đang học",
+      change_notes: "",
     },
   });
 
@@ -280,6 +283,27 @@ export function EditStudentForm({ student, onFinished }: EditStudentFormProps) {
                 </SelectContent>
               </Select>
               <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="change_notes"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Ghi chú thay đổi (tùy chọn)</FormLabel>
+              <FormControl>
+                <Textarea
+                  {...field}
+                  placeholder="VD: Sinh viên xin bảo lưu do vấn đề sức khỏe"
+                  rows={3}
+                />
+              </FormControl>
+              <FormMessage />
+              <p className="text-sm text-muted-foreground">
+                Ghi chú sẽ được lưu vào lịch sử thay đổi trạng thái
+              </p>
             </FormItem>
           )}
         />
