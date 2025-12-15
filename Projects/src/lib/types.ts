@@ -135,6 +135,9 @@ export type DefenseRegistration = {
   internship_reportLink?: string;
   internship_positionId?: string;
   internship_positionTitle?: string;
+  // Unified report status for this registration (new DB column `report_status`)
+  registrationReportStatus?: ReportStatus;
+  registrationReportStatusNote?: string;
 };
 
 // Represents a student's registration for a specific graduation defense session.

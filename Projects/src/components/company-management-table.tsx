@@ -12,7 +12,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Dialog, DialogTrigger, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,6 +49,7 @@ import { companiesService, type Company } from "@/services/companies.service";
 import { Skeleton } from "./ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
 import { AddCompanyFormApi } from "./add-company-form";
 import { EditCompanyForm } from "./edit-company-form";
 import { CompanyDetailsDialog } from "./company-details-dialog";
@@ -52,10 +58,20 @@ import { AssignCompaniesToSessionDialog } from "./assign-companies-to-session-di
 import { ImportCompaniesDialog } from "./import-companies-dialog";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/ui/pagination-controls";
+import {
+  defenseService,
+  type DefenseSession,
+} from "@/services/defense.service";
+import internshipsService from "@/services/internships.service";
+
+type InternshipCompany = Company & {
+  positions?: { quantity?: number }[];
+  isLHU?: boolean;
+};
 
 export function CompanyManagementTable() {
   const { toast } = useToast();
-  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companies, setCompanies] = useState<InternshipCompany[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -64,16 +80,26 @@ export function CompanyManagementTable() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isAssignToSessionDialogOpen, setIsAssignToSessionDialogOpen] =
     useState(false);
+  const [isAddPositionDialogOpen, setIsAddPositionDialogOpen] = useState(false);
   const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
-  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [selectedCompany, setSelectedCompany] =
+    useState<InternshipCompany | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRowIds, setSelectedRowIds] = useState<number[]>([]);
+  const [sessions, setSessions] = useState<DefenseSession[]>([]);
+  const [positionCompany, setPositionCompany] =
+    useState<InternshipCompany | null>(null);
+  const [positionSessionId, setPositionSessionId] = useState("");
+  const [positionTitle, setPositionTitle] = useState("");
+  const [positionDescription, setPositionDescription] = useState("");
+  const [positionCapacity, setPositionCapacity] = useState(1);
+  const [isSubmittingPosition, setIsSubmittingPosition] = useState(false);
 
   const loadCompanies = async (q?: string) => {
     try {
       setIsLoading(true);
       const data = await companiesService.getAll({ q: q || undefined });
-      setCompanies(data || []);
+      setCompanies((data as InternshipCompany[]) || []);
     } catch (err: any) {
       toast({
         variant: "destructive",
@@ -88,6 +114,31 @@ export function CompanyManagementTable() {
   useEffect(() => {
     loadCompanies();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await defenseService.getAll({ status: "active" });
+        setSessions(s || []);
+      } catch (err) {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const refreshSessions = async () => {
+    try {
+      const s = await defenseService.getAll();
+      setSessions(s || []);
+      toast({ title: "Đã tải lại đợt báo cáo" });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: err?.message || "Không thể tải đợt",
+      });
+    }
+  };
 
   useEffect(() => {
     setSelectedRowIds([]);
@@ -171,6 +222,19 @@ export function CompanyManagementTable() {
     } else {
       setSelectedRowIds((prev) => prev.filter((rowId) => rowId !== id));
     }
+  };
+
+  const resetPositionForm = () => {
+    setPositionSessionId("");
+    setPositionTitle("");
+    setPositionDescription("");
+    setPositionCapacity(1);
+  };
+
+  const handleAddPositionClick = (company: InternshipCompany) => {
+    setPositionCompany(company);
+    setIsAddPositionDialogOpen(true);
+    resetPositionForm();
   };
 
   const handleDialogFinished = () => {
@@ -424,6 +488,11 @@ export function CompanyManagementTable() {
                           Xem chi tiết
                         </DropdownMenuItem>
                         <DropdownMenuItem
+                          onClick={() => handleAddPositionClick(company)}
+                        >
+                          Thêm vị trí thực tập
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
                           onClick={() => handleDeleteClick(company)}
                         >
@@ -442,6 +511,7 @@ export function CompanyManagementTable() {
 
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
+          <DialogTitle>Chỉnh sửa doanh nghiệp</DialogTitle>
           {selectedCompany && (
             <EditCompanyForm
               company={selectedCompany}
@@ -452,7 +522,12 @@ export function CompanyManagementTable() {
       </Dialog>
 
       <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
-        {selectedCompany && <CompanyDetailsDialog company={selectedCompany} />}
+        <DialogContent>
+          <DialogTitle>Chi tiết doanh nghiệp</DialogTitle>
+          {selectedCompany && (
+            <CompanyDetailsDialog company={selectedCompany} />
+          )}
+        </DialogContent>
       </Dialog>
 
       <AlertDialog
@@ -482,6 +557,146 @@ export function CompanyManagementTable() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={isAddPositionDialogOpen}
+        onOpenChange={(open) => {
+          setIsAddPositionDialogOpen(open);
+          if (!open) {
+            setPositionCompany(null);
+            resetPositionForm();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogTitle>Thêm vị trí thực tập</DialogTitle>
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm text-muted-foreground">
+                {positionCompany?.name || "Chọn doanh nghiệp"}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Đợt báo cáo</label>
+              <div className="flex items-center gap-2">
+                <select
+                  className="w-full rounded-md border bg-background p-2"
+                  value={positionSessionId}
+                  onChange={(e) => setPositionSessionId(e.target.value)}
+                >
+                  <option value="">-- Chọn đợt --</option>
+                  {sessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.session_type_name || s.session_type})
+                    </option>
+                  ))}
+                </select>
+                <Button variant="outline" size="sm" onClick={refreshSessions}>
+                  Tải lại
+                </Button>
+              </div>
+              {sessions.length === 0 && (
+                <p className="text-xs text-gray-500">
+                  Chưa có đợt báo cáo. Nhấn "Tải lại" để thử lại.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Tiêu đề</label>
+              <Input
+                value={positionTitle}
+                onChange={(e) => setPositionTitle(e.target.value)}
+                placeholder="VD: Thực tập Frontend React"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Mô tả</label>
+              <Textarea
+                value={positionDescription}
+                onChange={(e) => setPositionDescription(e.target.value)}
+                rows={4}
+                placeholder="Nhiệm vụ chính, yêu cầu kỹ năng..."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Số lượng</label>
+              <Input
+                type="number"
+                min={1}
+                className="w-32"
+                value={positionCapacity}
+                onChange={(e) =>
+                  setPositionCapacity(Math.max(1, Number(e.target.value) || 1))
+                }
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setIsAddPositionDialogOpen(false)}
+              >
+                Hủy
+              </Button>
+              <Button
+                disabled={isSubmittingPosition}
+                onClick={async () => {
+                  if (!positionCompany) return;
+                  if (!positionSessionId) {
+                    toast({
+                      variant: "destructive",
+                      title: "Thiếu thông tin",
+                      description: "Vui lòng chọn đợt báo cáo.",
+                    });
+                    return;
+                  }
+                  if (!positionTitle.trim()) {
+                    toast({
+                      variant: "destructive",
+                      title: "Thiếu thông tin",
+                      description: "Vui lòng nhập tiêu đề vị trí.",
+                    });
+                    return;
+                  }
+                  setIsSubmittingPosition(true);
+                  try {
+                    await internshipsService.create(Number(positionSessionId), {
+                      company_id: positionCompany.id,
+                      title: positionTitle.trim(),
+                      description: positionDescription.trim(),
+                      capacity: positionCapacity,
+                      is_active: true,
+                    });
+                    toast({
+                      title: "Thành công",
+                      description: "Đã thêm vị trí thực tập.",
+                    });
+                    setIsAddPositionDialogOpen(false);
+                    setPositionCompany(null);
+                    resetPositionForm();
+                    loadCompanies();
+                  } catch (error: any) {
+                    toast({
+                      variant: "destructive",
+                      title: "Lỗi",
+                      description:
+                        error?.message || "Không thể thêm vị trí thực tập.",
+                    });
+                  } finally {
+                    setIsSubmittingPosition(false);
+                  }
+                }}
+              >
+                Thêm vị trí
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

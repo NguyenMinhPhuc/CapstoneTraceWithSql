@@ -11,25 +11,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Card,
+  CardHeader,
+  CardContent,
+  CardFooter,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -59,22 +48,7 @@ import {
   FileDown,
   ArrowUpDown,
 } from "lucide-react";
-import {
-  useFirestore,
-  errorEmitter,
-  FirestorePermissionError,
-  useCollection,
-  useMemoFirebase,
-} from "@/firebase";
-import {
-  collection,
-  doc,
-  deleteDoc,
-  writeBatch,
-  updateDoc,
-  query,
-  where,
-} from "firebase/firestore";
+import { defenseService } from "@/services/defense.service";
 import type {
   DefenseRegistration,
   StudentWithRegistrationDetails,
@@ -83,6 +57,25 @@ import type {
   WeeklyProgressReport,
 } from "@/lib/types";
 import { Skeleton } from "./ui/skeleton";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { AddStudentRegistrationForm } from "./add-student-registration-form";
 import { EditStudentRegistrationForm } from "./edit-student-registration-form";
@@ -119,6 +112,7 @@ interface StudentRegistrationTableProps {
   sessionType: DefenseSession["sessionType"];
   initialData: StudentWithRegistrationDetails[] | null;
   isLoading: boolean;
+  onReload?: () => void;
 }
 
 type SortKey =
@@ -161,8 +155,8 @@ export function StudentRegistrationTable({
   sessionType,
   initialData,
   isLoading,
+  onReload,
 }: StudentRegistrationTableProps) {
-  const firestore = useFirestore();
   const { toast } = useToast();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isAddByClassDialogOpen, setIsAddByClassDialogOpen] = useState(false);
@@ -200,45 +194,17 @@ export function StudentRegistrationTable({
     setSelectedRowIds([]);
   }, [initialData]);
 
-  const subcommitteesCollectionRef = useMemoFirebase(
-    () =>
-      collection(
-        firestore,
-        `graduationDefenseSessions/${sessionId}/subCommittees`
-      ),
-    [firestore, sessionId]
-  );
-  const { data: subCommittees } = useCollection<DefenseSubCommittee>(
-    subcommitteesCollectionRef
-  );
+  // Subcommittees are stored in backend; for now load via initialData parent or leave empty.
+  const subCommittees: any[] | null = [];
 
   // Query để lấy tất cả báo cáo tiến độ của session này
-  const progressReportsQuery = useMemoFirebase(
-    () =>
-      query(
-        collection(firestore, "weeklyProgressReports"),
-        where("sessionId", "==", sessionId)
-      ),
-    [firestore, sessionId]
-  );
-  const { data: progressReports } =
-    useCollection<WeeklyProgressReport>(progressReportsQuery);
+  const progressReports: WeeklyProgressReport[] | null = [];
 
   // Query để lấy TẤT CẢ đăng ký của tất cả sinh viên (để đếm số đợt)
-  const allRegistrationsQuery = useMemoFirebase(
-    () => collection(firestore, "defenseRegistrations"),
-    [firestore]
-  );
-  const { data: allRegistrations } = useCollection<DefenseRegistration>(
-    allRegistrationsQuery
-  );
+  const allRegistrations: any[] | null = [];
 
   // Query để lấy tất cả các sessions (để biết sessionType)
-  const allSessionsQuery = useMemoFirebase(
-    () => collection(firestore, "graduationDefenseSessions"),
-    [firestore]
-  );
-  const { data: allSessions } = useCollection<DefenseSession>(allSessionsQuery);
+  const allSessions: DefenseSession[] | null = [];
 
   // Tạo map sessionId -> sessionType
   const sessionTypeMap = useMemo(() => {
@@ -351,8 +317,10 @@ export function StudentRegistrationTable({
 
     let filtered = initialData.filter((reg) => {
       const term = searchTerm.toLowerCase();
-      const nameMatch = reg.studentName.toLowerCase().includes(term);
-      const idMatch = reg.studentId.toLowerCase().includes(term);
+      const nameMatch = (reg.studentName || "").toLowerCase().includes(term);
+      const idMatch = String(reg.studentId || "")
+        .toLowerCase()
+        .includes(term);
       const searchMatch = nameMatch || idMatch;
 
       const supervisorMatch =
@@ -464,31 +432,28 @@ export function StudentRegistrationTable({
     registrationId: string,
     newSubCommitteeId: string
   ) => {
-    const registrationDocRef = doc(
-      firestore,
-      "defenseRegistrations",
-      registrationId
-    );
-    const subCommitteeIdToUpdate =
-      newSubCommitteeId === UNASSIGNED_VALUE ? "" : newSubCommitteeId;
-
-    const updateData = { subCommitteeId: subCommitteeIdToUpdate };
-
-    updateDoc(registrationDocRef, updateData)
-      .then(() => {
-        toast({
-          title: "Thành công",
-          description: "Đã cập nhật tiểu ban cho sinh viên.",
-        });
-      })
-      .catch((error) => {
-        const contextualError = new FirestorePermissionError({
-          path: registrationDocRef.path,
-          operation: "update",
-          requestResourceData: updateData,
-        });
-        errorEmitter.emit("permission-error", contextualError);
+    try {
+      const numericId = Number(registrationId);
+      if (isNaN(numericId)) throw new Error("Invalid registration id");
+      const payload: any = {};
+      payload.subcommittee_id =
+        newSubCommitteeId === UNASSIGNED_VALUE
+          ? null
+          : Number(newSubCommitteeId);
+      await defenseService.updateRegistration(numericId, payload);
+      toast({
+        title: "Thành công",
+        description: "Đã cập nhật tiểu ban cho sinh viên.",
       });
+      onReload?.();
+    } catch (error) {
+      console.error("Failed to update subcommittee via API:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể cập nhật tiểu ban. Vui lòng thử lại.",
+      });
+    }
   };
 
   const handleEditClick = (registration: DefenseRegistration) => {
@@ -533,13 +498,27 @@ export function StudentRegistrationTable({
       };
     }
 
-    registrationIds.forEach((id) => {
-      const registrationDocRef = doc(firestore, "defenseRegistrations", id);
-      batch.update(registrationDocRef, dataToUpdate);
-    });
-
     try {
-      await batch.commit();
+      // Sequentially update each registration via backend API
+      for (const id of registrationIds) {
+        const numericId = Number(id);
+        if (isNaN(numericId)) continue;
+
+        const payload: any = {
+          report_status: "reporting",
+          report_status_note: "",
+        };
+
+        const updatePromise = defenseService.updateRegistration(
+          numericId,
+          payload
+        );
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("update timeout")), 10000)
+        );
+        await Promise.race([updatePromise, timeoutPromise]);
+      }
+
       toast({
         title: "Thành công",
         description: `Đã cập nhật trạng thái cho ${registrationIds.length} sinh viên.`,
@@ -547,12 +526,6 @@ export function StudentRegistrationTable({
       setSelectedRowIds([]); // Clear selection after action
     } catch (error) {
       console.error("Error reverting registration status:", error);
-      const contextualError = new FirestorePermissionError({
-        path: "batch update on defenseRegistrations",
-        operation: "update",
-        requestResourceData: dataToUpdate,
-      });
-      errorEmitter.emit("permission-error", contextualError);
       toast({
         variant: "destructive",
         title: "Lỗi",
@@ -567,43 +540,41 @@ export function StudentRegistrationTable({
   };
 
   const confirmDelete = async () => {
-    const batch = writeBatch(firestore);
     let count = 0;
 
-    if (selectedRowIds.length > 0) {
-      selectedRowIds.forEach((id) => {
-        const registrationDocRef = doc(firestore, "defenseRegistrations", id);
-        batch.delete(registrationDocRef);
-      });
-      count = selectedRowIds.length;
-    } else if (registrationToDelete) {
-      const registrationDocRef = doc(
-        firestore,
-        "defenseRegistrations",
-        registrationToDelete.id
-      );
-      batch.delete(registrationDocRef);
-      count = 1;
-    }
-
-    if (count === 0) return;
-
     try {
-      await batch.commit();
-      toast({
-        title: "Thành công",
-        description: `Đã xóa ${count} sinh viên khỏi đợt báo cáo.`,
-      });
+      if (selectedRowIds.length > 0) {
+        // delete sequentially for now
+        for (const id of selectedRowIds) {
+          const numericId = Number(id);
+          await defenseService.deleteRegistration(numericId);
+        }
+        count = selectedRowIds.length;
+      } else if (registrationToDelete) {
+        await defenseService.deleteRegistration(
+          Number(registrationToDelete.id)
+        );
+        count = 1;
+      }
+
+      if (count > 0) {
+        toast({
+          title: "Thành công",
+          description: `Đã xóa ${count} sinh viên khỏi đợt báo cáo.`,
+        });
+      }
     } catch (error) {
-      const contextualError = new FirestorePermissionError({
-        path: "batch delete on defenseRegistrations",
-        operation: "delete",
+      console.error("Error deleting registrations via API:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể xóa đăng ký sinh viên.",
       });
-      errorEmitter.emit("permission-error", contextualError);
     } finally {
       setIsDeleteDialogOpen(false);
       setRegistrationToDelete(null);
       setSelectedRowIds([]);
+      onReload?.();
     }
   };
 
@@ -646,6 +617,7 @@ export function StudentRegistrationTable({
     setIsAssignManualDialogOpen(false);
     setIsAssignInternshipSupervisorDialogOpen(false);
     setSelectedRowIds([]);
+    onReload?.();
   };
 
   const exportToExcel = () => {
@@ -949,7 +921,10 @@ export function StudentRegistrationTable({
                   sessionId={sessionId}
                   allRegistrations={initialData || []}
                   subCommittees={subCommittees || []}
-                  onFinished={() => setIsAssignSubcommitteeDialogOpen(false)}
+                  onFinished={() => {
+                    setIsAssignSubcommitteeDialogOpen(false);
+                    onReload?.();
+                  }}
                 />
               </Dialog>
               <Dialog
@@ -966,7 +941,10 @@ export function StudentRegistrationTable({
                   sessionId={sessionId}
                   sessionType={sessionType}
                   existingRegistrations={initialData || []}
-                  onFinished={() => setIsAddByClassDialogOpen(false)}
+                  onFinished={() => {
+                    setIsAddByClassDialogOpen(false);
+                    onReload?.();
+                  }}
                 />
               </Dialog>
               <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -986,7 +964,11 @@ export function StudentRegistrationTable({
                   <AddStudentRegistrationForm
                     sessionId={sessionId}
                     sessionType={sessionType}
-                    onFinished={() => setIsAddDialogOpen(false)}
+                    existingRegistrations={initialData || []}
+                    onFinished={() => {
+                      setIsAddDialogOpen(false);
+                      onReload?.();
+                    }}
                   />
                 </DialogContent>
               </Dialog>
@@ -1171,26 +1153,53 @@ export function StudentRegistrationTable({
                       </Select>
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <Badge
-                          variant={
-                            registrationStatusVariant[reg.graduationStatus]
-                          }
-                          className="justify-center"
-                        >
-                          <GraduationCap className="mr-1 h-3 w-3" />
-                          {registrationStatusLabel[reg.graduationStatus]}
-                        </Badge>
-                        <Badge
-                          variant={
-                            registrationStatusVariant[reg.internshipStatus]
-                          }
-                          className="justify-center"
-                        >
-                          <Briefcase className="mr-1 h-3 w-3" />
-                          {registrationStatusLabel[reg.internshipStatus]}
-                        </Badge>
-                      </div>
+                      {(() => {
+                        const unifiedStatus =
+                          (reg as any).reportStatus ||
+                          (reg as any).report_status ||
+                          (reg as any).registrationReportStatus ||
+                          reg.graduationStatus ||
+                          reg.internshipStatus ||
+                          "";
+
+                        return (
+                          <Select
+                            value={unifiedStatus}
+                            onValueChange={async (val) => {
+                              try {
+                                await defenseService.updateRegistration(
+                                  Number(reg.id),
+                                  { report_status: val || null, report_status_note: "" } as any
+                                );
+                                toast({ title: "Thành công", description: "Đã cập nhật trạng thái." });
+                                onReload?.();
+                              } catch (err) {
+                                console.error("Update status failed", err);
+                                toast({ variant: "destructive", title: "Lỗi", description: "Không thể cập nhật trạng thái." });
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="w-36 text-sm h-8">
+                              <SelectValue
+                                placeholder={
+                                  unifiedStatus
+                                    ? (registrationStatusLabel as any)[unifiedStatus] || String(unifiedStatus)
+                                    : "(Không)"
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(registrationStatusLabel).map(
+                                ([key, label]) => (
+                                  <SelectItem key={key} value={key}>
+                                    {label}
+                                  </SelectItem>
+                                )
+                              )}
+                            </SelectContent>
+                          </Select>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
@@ -1367,7 +1376,10 @@ export function StudentRegistrationTable({
           {selectedRegistration && (
             <EditStudentRegistrationForm
               registration={selectedRegistration}
-              onFinished={() => setIsEditDialogOpen(false)}
+              onFinished={() => {
+                setIsEditDialogOpen(false);
+                onReload?.();
+              }}
             />
           )}
         </DialogContent>

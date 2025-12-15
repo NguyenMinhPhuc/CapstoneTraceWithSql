@@ -574,6 +574,18 @@ export function AppSidebar() {
                       <SidebarMenuItem>
                         <SidebarMenuButton
                           asChild
+                          isActive={isActive("/admin/internship-positions")}
+                          tooltip="Quản lý Vị trí thực tập"
+                        >
+                          <Link href="/admin/internship-positions">
+                            <ClipboardList />
+                            <span>Quản lý Vị trí thực tập</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton
+                          asChild
                           isActive={isActive("/admin/internship-approvals")}
                           tooltip="Internship Approvals"
                         >

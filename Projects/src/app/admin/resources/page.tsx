@@ -502,7 +502,10 @@ export default function ResourceManagementPage() {
                     <TableCell className="max-w-md">
                       <div className="line-clamp-2 text-sm text-muted-foreground">
                         {resource.summary
-                          ? resource.summary
+                          ? (typeof resource.summary === "string"
+                              ? resource.summary
+                              : String(resource.summary)
+                            )
                               .replace(/[#*`[\]]/g, "")
                               .substring(0, 100)
                           : "-"}

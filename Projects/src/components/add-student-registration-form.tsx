@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
-import * as z from 'zod';
-import { Button } from '@/components/ui/button';
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import * as z from "zod";
+import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
@@ -11,64 +11,115 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import { useToast } from '@/hooks/use-toast';
-import { useFirestore } from '@/firebase';
-import { collection, addDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
-import type { Student, Supervisor, DefenseSession, DefenseRegistration } from '@/lib/types';
-import { useEffect, useState } from 'react';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from './ui/command';
-import { Check, ChevronsUpDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
-
+} from "@/components/ui/form";
+import { useToast } from "@/hooks/use-toast";
+import type { DefenseSession } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "./ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { defenseService } from "@/services/defense.service";
+import { studentsService, type Student } from "@/services/students.service";
+import { debounce } from "lodash";
 
 const formSchema = z.object({
-  studentDocId: z.string({ required_error: 'Vui lòng chọn một sinh viên.' }),
+  studentId: z.number({ required_error: "Vui lòng chọn một sinh viên." }).int(),
 });
 
 interface AddStudentRegistrationFormProps {
   sessionId: string;
-  sessionType: DefenseSession['sessionType'];
+  sessionType: DefenseSession["sessionType"];
+  existingRegistrations: Array<{
+    studentId?: string | null;
+    student_code?: string | null;
+  }>;
   onFinished: () => void;
 }
 
-export function AddStudentRegistrationForm({ sessionId, sessionType, onFinished }: AddStudentRegistrationFormProps) {
+export function AddStudentRegistrationForm({
+  sessionId,
+  sessionType,
+  existingRegistrations,
+  onFinished,
+}: AddStudentRegistrationFormProps) {
   const { toast } = useToast();
-  const firestore = useFirestore();
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
   const [comboboxOpen, setComboboxOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const registeredCodes = useMemo(() => {
+    return new Set(
+      existingRegistrations
+        .map((reg) =>
+          String(reg.studentId || reg.student_code || "").toLowerCase()
+        )
+        .filter((code) => code !== "")
+    );
+  }, [existingRegistrations]);
 
   useEffect(() => {
-    const fetchStudents = async () => {
+    const load = async (term: string) => {
+      setIsLoadingStudents(true);
       try {
-        // Fetch existing registrations for this session to filter out already registered students
-        const registrationsQuery = query(collection(firestore, 'defenseRegistrations'), where('sessionId', '==', sessionId));
-        const registrationsSnapshot = await getDocs(registrationsQuery);
-        const registeredStudentIds = new Set(registrationsSnapshot.docs.map(doc => doc.data().studentDocId));
+        const resp = await studentsService.getPaged({
+          q: term || undefined,
+          page: 1,
+          pageSize: 50,
+        });
 
-        const studentsCollectionRef = collection(firestore, 'students');
-        const querySnapshot = await getDocs(studentsCollectionRef);
-        const studentList = querySnapshot.docs
-            .map(doc => ({ id: doc.id, ...doc.data() } as Student))
-            .filter(student => !registeredStudentIds.has(student.id)); // Exclude already registered students
+        // Backend may return either an array or an object with rows
+        const candidates = Array.isArray(resp) ? resp : resp?.rows || [];
 
-        setStudents(studentList);
+        let filtered = candidates.filter(
+          (s) =>
+            !registeredCodes.has(String(s.student_code || "").toLowerCase())
+        );
+
+        // Fallback: if no results on empty search, fetch first 100 via getAll
+        if (filtered.length === 0 && !term) {
+          const all = await studentsService.getAll(
+            undefined,
+            undefined,
+            undefined,
+            undefined
+          );
+          filtered = (all || [])
+            .slice(0, 100)
+            .filter(
+              (s) =>
+                !registeredCodes.has(String(s.student_code || "").toLowerCase())
+            );
+        }
+
+        setStudents(filtered);
       } catch (error) {
         console.error("Error fetching students:", error);
+        setStudents([]);
         toast({
-          variant: 'destructive',
-          title: 'Lỗi',
-          description: 'Không thể tải danh sách sinh viên.',
+          variant: "destructive",
+          title: "Lỗi",
+          description: "Không thể tải danh sách sinh viên.",
         });
       } finally {
         setIsLoadingStudents(false);
       }
     };
-    fetchStudents();
-  }, [firestore, toast, sessionId]);
+
+    const debouncedLoad = debounce(load, 250);
+    debouncedLoad(searchTerm);
+    return () => {
+      debouncedLoad.cancel();
+    };
+  }, [searchTerm, toast, registeredCodes]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -76,62 +127,79 @@ export function AddStudentRegistrationForm({ sessionId, sessionType, onFinished 
   });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    const registrationsCollectionRef = collection(firestore, 'defenseRegistrations');
-      
-    const selectedStudent = students.find(s => s.id === values.studentDocId);
+    // Call backend API to create registration
+    const selectedStudent = students.find((s) => s.id === values.studentId);
     if (!selectedStudent) {
       toast({
-        variant: 'destructive',
-        title: 'Lỗi',
-        description: 'Không tìm thấy thông tin sinh viên đã chọn.',
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không tìm thấy thông tin sinh viên đã chọn.",
       });
       return;
     }
 
-    if (!selectedStudent.studentId) {
-        toast({
-            variant: 'destructive',
-            title: 'Thiếu thông tin',
-            description: `Sinh viên ${selectedStudent.firstName} ${selectedStudent.lastName} chưa có Mã số sinh viên. Vui lòng cập nhật hồ sơ sinh viên trước.`,
-        });
-        return;
-    }
-    
-    const newRegistrationData: Partial<DefenseRegistration> = {
-      sessionId: sessionId,
-      studentDocId: selectedStudent.id,
-      studentId: selectedStudent.studentId,
-      studentName: `${selectedStudent.firstName} ${selectedStudent.lastName}`,
-      registrationDate: serverTimestamp(),
-    };
-    
-    if (sessionType === 'graduation') {
-        newRegistrationData.graduationStatus = 'reporting';
-        newRegistrationData.internshipStatus = 'not_reporting';
-    } else if (sessionType === 'internship') {
-        newRegistrationData.graduationStatus = 'not_reporting';
-        newRegistrationData.internshipStatus = 'reporting';
-    } else { // combined
-        newRegistrationData.graduationStatus = 'reporting';
-        newRegistrationData.internshipStatus = 'reporting';
+    if (!selectedStudent.student_code) {
+      toast({
+        variant: "destructive",
+        title: "Thiếu thông tin",
+        description: `Sinh viên ${selectedStudent.full_name} chưa có Mã số sinh viên. Vui lòng cập nhật hồ sơ sinh viên trước.`,
+      });
+      return;
     }
 
+    const newRegistrationPayload: any = {
+      student_id: selectedStudent.id,
+      student_code: selectedStudent.student_code,
+      student_name: selectedStudent.full_name,
+      class_name:
+        selectedStudent.class_name ?? selectedStudent.class_code ?? null,
+    };
+
+    const st = String(sessionType || "").toLowerCase();
+    const isGraduation =
+      st === "graduation" ||
+      st.includes("grad") ||
+      st.includes("tốt") ||
+      st.includes("tot");
+    const isInternship =
+      st === "internship" ||
+      st.includes("intern") ||
+      st.includes("thực") ||
+      st.includes("thuc");
+
+    // Set unified report status. If the session clearly maps to one type
+    // we mark the registration as `reporting`. Otherwise default to `reporting`.
+    newRegistrationPayload.report_status = "reporting";
 
     try {
-        await addDoc(registrationsCollectionRef, newRegistrationData);
-        toast({
-          title: 'Thành công',
-          description: `Đã thêm sinh viên ${newRegistrationData.studentName} vào đợt báo cáo.`,
+      // Debug log to inspect payload and resolved sessionType
+      try {
+        // eslint-disable-next-line no-console
+        console.debug("AddStudent payload", {
+          sessionId,
+          sessionType,
+          resolvedSessionType: String(sessionType),
+          newRegistrationPayload,
         });
-        onFinished();
-      } catch (error: any) {
-        console.error("Error creating registration:", error);
-        toast({
-          variant: "destructive",
-          title: "Lỗi",
-          description: error.message,
-        });
-      }
+      } catch (e) {}
+
+      await defenseService.createRegistration(
+        sessionId,
+        newRegistrationPayload as any
+      );
+      toast({
+        title: "Thành công",
+        description: `Đã thêm sinh viên ${newRegistrationPayload.student_name} vào đợt báo cáo.`,
+      });
+      onFinished();
+    } catch (error: any) {
+      console.error("Error creating registration:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: error?.message || "Không thể thêm đăng ký.",
+      });
+    }
   }
 
   return (
@@ -139,7 +207,7 @@ export function AddStudentRegistrationForm({ sessionId, sessionType, onFinished 
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
         <FormField
           control={form.control}
-          name="studentDocId"
+          name="studentId"
           render={({ field }) => (
             <FormItem className="flex flex-col">
               <FormLabel>Sinh viên</FormLabel>
@@ -157,9 +225,8 @@ export function AddStudentRegistrationForm({ sessionId, sessionType, onFinished 
                       {isLoadingStudents
                         ? "Đang tải..."
                         : field.value
-                        ? students.find(
-                            (student) => student.id === field.value
-                          )?.studentId
+                        ? students.find((student) => student.id === field.value)
+                            ?.student_code
                         : "Tìm sinh viên theo MSSV hoặc tên"}
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
@@ -167,16 +234,20 @@ export function AddStudentRegistrationForm({ sessionId, sessionType, onFinished 
                 </PopoverTrigger>
                 <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
                   <Command>
-                    <CommandInput placeholder="Tìm sinh viên..." />
+                    <CommandInput
+                      placeholder="Tìm sinh viên..."
+                      value={searchTerm}
+                      onValueChange={setSearchTerm}
+                    />
                     <CommandList>
                       <CommandEmpty>Không tìm thấy sinh viên.</CommandEmpty>
                       <CommandGroup>
                         {students.map((student) => (
                           <CommandItem
-                            value={`${student.studentId} ${student.firstName} ${student.lastName}`}
+                            value={`${student.student_code} ${student.full_name}`}
                             key={student.id}
                             onSelect={() => {
-                              form.setValue("studentDocId", student.id);
+                              form.setValue("studentId", student.id);
                               setComboboxOpen(false);
                             }}
                           >
@@ -189,8 +260,10 @@ export function AddStudentRegistrationForm({ sessionId, sessionType, onFinished 
                               )}
                             />
                             <div>
-                                <p className="font-medium">{student.firstName} {student.lastName}</p>
-                                <p className="text-sm text-muted-foreground">{student.studentId}</p>
+                              <p className="font-medium">{student.full_name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {student.student_code}
+                              </p>
                             </div>
                           </CommandItem>
                         ))}
@@ -203,7 +276,11 @@ export function AddStudentRegistrationForm({ sessionId, sessionType, onFinished 
             </FormItem>
           )}
         />
-        <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={form.formState.isSubmitting}
+        >
           {form.formState.isSubmitting ? "Đang thêm..." : "Thêm sinh viên"}
         </Button>
       </form>

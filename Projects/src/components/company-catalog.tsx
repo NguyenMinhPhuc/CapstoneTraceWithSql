@@ -22,7 +22,12 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { companiesService, Company } from "@/services/companies.service";
 import { Skeleton } from "./ui/skeleton";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { CompanyForm } from "./company-form";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -33,7 +38,18 @@ import {
   Trash2,
   Download,
   X,
+  Briefcase,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  defenseService,
+  type DefenseSession,
+} from "@/services/defense.service";
+import internshipsService from "@/services/internships.service";
+import {
+  supervisorsService,
+  type Supervisor,
+} from "@/services/supervisors.service";
 
 export function CompanyCatalog() {
   const { toast } = useToast();
@@ -47,6 +63,18 @@ export function CompanyCatalog() {
   const [sortField, setSortField] = useState("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+
+  // State for adding internship position
+  const [sessions, setSessions] = useState<DefenseSession[]>([]);
+  const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
+  const [isAddPositionOpen, setIsAddPositionOpen] = useState(false);
+  const [positionCompany, setPositionCompany] = useState<Company | null>(null);
+  const [positionSessionId, setPositionSessionId] = useState("");
+  const [positionTitle, setPositionTitle] = useState("");
+  const [positionDescription, setPositionDescription] = useState("");
+  const [positionCapacity, setPositionCapacity] = useState(1);
+  const [positionManagerId, setPositionManagerId] = useState("__none");
+  const [isSubmittingPosition, setIsSubmittingPosition] = useState(false);
 
   const load = async () => {
     setIsLoading(true);
@@ -66,6 +94,44 @@ export function CompanyCatalog() {
 
   useEffect(() => {
     load();
+  }, []);
+
+  // Load defense sessions for position modal
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await defenseService.getAll({ status: "active" });
+        setSessions(s || []);
+      } catch (err) {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const refreshSessions = async () => {
+    try {
+      const s = await defenseService.getAll();
+      setSessions(s || []);
+      toast({ title: "Đã tải lại đợt báo cáo" });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: err?.message || "Không thể tải đợt",
+      });
+    }
+  };
+
+  // Load supervisors (teachers) for LHU company position manager
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await supervisorsService.getAll();
+        setSupervisors(list || []);
+      } catch (err) {
+        // ignore
+      }
+    })();
   }, []);
 
   // Filter and sort companies
@@ -171,6 +237,73 @@ export function CompanyCatalog() {
     } else {
       setSortField(field);
       setSortOrder("asc");
+    }
+  };
+
+  const resetPositionForm = () => {
+    setPositionSessionId("");
+    setPositionTitle("");
+    setPositionDescription("");
+    setPositionCapacity(1);
+    setPositionManagerId("");
+  };
+
+  const handleAddPositionClick = (company: Company) => {
+    setPositionCompany(company);
+    setIsAddPositionOpen(true);
+    resetPositionForm();
+  };
+
+  // Check if selected company is LHU
+  const isLhuCompany =
+    (positionCompany as any)?.company_type?.toUpperCase() === "LHU";
+
+  const handleSubmitPosition = async () => {
+    if (!positionCompany) return;
+    if (!positionSessionId) {
+      toast({
+        variant: "destructive",
+        title: "Thiếu thông tin",
+        description: "Vui lòng chọn đợt báo cáo.",
+      });
+      return;
+    }
+    if (!positionTitle.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Thiếu thông tin",
+        description: "Vui lòng nhập tiêu đề vị trí.",
+      });
+      return;
+    }
+    setIsSubmittingPosition(true);
+    try {
+      await internshipsService.create(Number(positionSessionId), {
+        company_id: positionCompany.id,
+        title: positionTitle.trim(),
+        description: positionDescription.trim(),
+        capacity: positionCapacity,
+        manager_user_id:
+          isLhuCompany && positionManagerId && positionManagerId !== "__none"
+            ? positionManagerId
+            : null,
+        is_active: true,
+      });
+      toast({
+        title: "Thành công",
+        description: "Đã thêm vị trí thực tập.",
+      });
+      setIsAddPositionOpen(false);
+      setPositionCompany(null);
+      resetPositionForm();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: error?.message || "Không thể thêm vị trí thực tập.",
+      });
+    } finally {
+      setIsSubmittingPosition(false);
     }
   };
 
@@ -378,6 +511,15 @@ export function CompanyCatalog() {
                       <Button
                         size="sm"
                         variant="outline"
+                        onClick={() => handleAddPositionClick(c)}
+                        title="Thêm vị trí thực tập"
+                        className="gap-1"
+                      >
+                        <Briefcase className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => setEditing(c)}
                         className="gap-2"
                       >
@@ -414,10 +556,139 @@ export function CompanyCatalog() {
       {editing && (
         <Dialog open={!!editing} onOpenChange={() => setEditing(null)}>
           <DialogContent>
+            <DialogTitle>Chỉnh sửa doanh nghiệp</DialogTitle>
             <CompanyForm company={editing} onSaved={onSaved} />
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Add Internship Position Dialog */}
+      <Dialog
+        open={isAddPositionOpen}
+        onOpenChange={(open) => {
+          setIsAddPositionOpen(open);
+          if (!open) {
+            setPositionCompany(null);
+            resetPositionForm();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogTitle>Thêm vị trí thực tập</DialogTitle>
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold">Thêm vị trí thực tập</h3>
+              <p className="text-sm text-gray-500">
+                {positionCompany?.name || "Chọn doanh nghiệp"}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Đợt báo cáo *</label>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={positionSessionId}
+                  onValueChange={setPositionSessionId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="-- Chọn đợt --" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sessions.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.name} ({s.session_type_name || s.session_type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={refreshSessions}>
+                  Tải lại
+                </Button>
+              </div>
+              {sessions.length === 0 && (
+                <p className="text-xs text-gray-500">
+                  Chưa có đợt báo cáo. Nhấn "Tải lại" để thử lại.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Tiêu đề *</label>
+              <Input
+                value={positionTitle}
+                onChange={(e) => setPositionTitle(e.target.value)}
+                placeholder="VD: Thực tập Frontend React"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Mô tả</label>
+              <Textarea
+                value={positionDescription}
+                onChange={(e) => setPositionDescription(e.target.value)}
+                rows={4}
+                placeholder="Nhiệm vụ chính, yêu cầu kỹ năng..."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Số lượng sinh viên</label>
+              <Input
+                type="number"
+                min={1}
+                className="w-32"
+                value={positionCapacity}
+                onChange={(e) =>
+                  setPositionCapacity(Math.max(1, Number(e.target.value) || 1))
+                }
+              />
+            </div>
+
+            {/* Show teacher/supervisor selector only for LHU companies */}
+            {isLhuCompany && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Giảng viên quản lý
+                </label>
+                <Select
+                  value={positionManagerId}
+                  onValueChange={setPositionManagerId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="-- Chọn giảng viên --" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Không chọn</SelectItem>
+                    {supervisors.map((sv) => (
+                      <SelectItem key={sv.id} value={sv.user_id}>
+                        {sv.full_name || sv.email} ({sv.title || "GV"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">
+                  Chọn giảng viên phụ trách vị trí thực tập này
+                </p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setIsAddPositionOpen(false)}
+              >
+                Hủy
+              </Button>
+              <Button
+                disabled={isSubmittingPosition}
+                onClick={handleSubmitPosition}
+              >
+                Thêm vị trí
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

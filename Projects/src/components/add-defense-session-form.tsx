@@ -22,40 +22,13 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { useToast } from "@/hooks/use-toast";
 import {
-  useCollection,
-  useFirestore,
-  errorEmitter,
-  FirestorePermissionError,
-  useMemoFirebase,
-} from "@/firebase";
-import {
-  collection,
-  addDoc,
-  serverTimestamp,
-  Timestamp,
-} from "firebase/firestore";
-import { companiesService } from "@/services/companies.service";
-import {
-  CalendarIcon,
-  GraduationCap,
-  Briefcase,
-  UserCheck,
-  Building,
-  Check,
-  ChevronsUpDown,
-} from "lucide-react";
+  defenseService,
+  SessionType,
+  Rubric,
+} from "@/services/defense.service";
+import { CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, addMonths, startOfMonth, getDay, addDays } from "date-fns";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import type { Rubric, InternshipCompany, DefenseSession } from "@/lib/types";
-import { Separator } from "./ui/separator";
-import { Slider } from "./ui/slider";
 import {
   DialogFooter,
   DialogHeader,
@@ -63,134 +36,190 @@ import {
   DialogDescription,
 } from "./ui/dialog";
 import { ScrollArea } from "./ui/scroll-area";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "./ui/command";
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "./ui/select";
 import * as React from "react";
-import { Badge } from "./ui/badge";
 
-const NO_RUBRIC_VALUE = "__NONE__";
-
-const formSchema = z.object({
-  name: z.string().min(1, { message: "Tên đợt là bắt buộc." }),
-  sessionType: z.enum(["graduation", "internship", "combined"], {
-    required_error: "Vui lòng chọn loại đợt báo cáo.",
-  }),
-  startDate: z.date({ required_error: "Ngày bắt đầu là bắt buộc." }),
-  registrationDeadline: z.date({
-    required_error: "Ngày hết hạn đăng ký là bắt buộc.",
-  }),
-  expectedReportDate: z.date({
-    required_error: "Ngày báo cáo dự kiến là bắt buộc.",
-  }),
-  zaloGroupLink: z
-    .string()
-    .url({ message: "Vui lòng nhập một URL hợp lệ." })
-    .optional()
-    .or(z.literal("")),
-  description: z.string().optional(),
-  postDefenseSubmissionLink: z
-    .string()
-    .url({ message: "Vui lòng nhập một URL hợp lệ." })
-    .optional()
-    .or(z.literal("")),
-  postDefenseSubmissionDescription: z.string().optional(),
-  companyIds: z.array(z.string()).optional(),
-  councilGraduationRubricId: z.string().optional(),
-  councilInternshipRubricId: z.string().optional(),
-  supervisorGraduationRubricId: z.string().optional(),
-  companyInternshipRubricId: z.string().optional(),
-  graduationCouncilWeight: z.number().min(0).max(100).optional(),
-  internshipCouncilWeight: z.number().min(0).max(100).optional(),
-});
+// Dynamic schema based on DB session types
+const createFormSchema = (sessionTypes: string[]) => {
+  const options =
+    sessionTypes.length > 0
+      ? (sessionTypes as [string, ...string[]])
+      : ([""] as [string]);
+  return z.object({
+    name: z.string().min(1, { message: "Tên đợt là bắt buộc." }),
+    sessionType: z.enum(options, {
+      required_error: "Vui lòng chọn loại đợt báo cáo.",
+    }),
+    startDate: z.date({ required_error: "Ngày bắt đầu là bắt buộc." }),
+    registrationDeadline: z.date({
+      required_error: "Ngày hết hạn đăng ký là bắt buộc.",
+    }),
+    expectedReportDate: z.date({
+      required_error: "Ngày báo cáo dự kiến là bắt buộc.",
+    }),
+    submissionDeadline: z.date().optional(),
+    description: z.string().optional(),
+    linhGroup: z.string().optional(),
+    councilScoreRatio: z.number().min(0).max(100).optional(),
+    supervisorScoreRatio: z.number().min(0).max(100).optional(),
+    submissionFolderLink: z.string().url().optional().or(z.literal("")),
+    submissionDescription: z.string().optional(),
+    councilRubricId: z.string().optional(),
+    supervisorRubricId: z.string().optional(),
+  });
+};
 
 interface AddDefenseSessionFormProps {
   onFinished: () => void;
-  sessionToCopy?: DefenseSession | null;
 }
 
 export function AddDefenseSessionForm({
   onFinished,
-  sessionToCopy,
 }: AddDefenseSessionFormProps) {
   const { toast } = useToast();
-  const firestore = useFirestore();
-
-  const rubricsCollectionRef = useMemoFirebase(
-    () => collection(firestore, "rubrics"),
-    [firestore]
+  const [sessionTypes, setSessionTypes] = React.useState<SessionType[]>([]);
+  const [isLoadingTypes, setIsLoadingTypes] = React.useState(true);
+  const [councilRubrics, setCouncilRubrics] = React.useState<Rubric[]>([]);
+  const [supervisorRubrics, setSupervisorRubrics] = React.useState<Rubric[]>(
+    []
   );
-  const { data: rubrics, isLoading: isLoadingRubrics } =
-    useCollection<Rubric>(rubricsCollectionRef);
+  const [isLoadingRubrics, setIsLoadingRubrics] = React.useState(true);
 
-  const [companies, setCompanies] = React.useState<InternshipCompany[] | null>(
-    null
+  const formSchema = React.useMemo(
+    () => createFormSchema(sessionTypes.map((t) => String(t.session_type))),
+    [sessionTypes]
   );
-  const [isLoadingCompanies, setIsLoadingCompanies] =
-    React.useState<boolean>(true);
 
+  const form = useForm<any>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      name: "",
+      sessionType: "",
+      description: "",
+      startDate: new Date(),
+      registrationDeadline: undefined,
+      submissionDeadline: undefined,
+      expectedReportDate: undefined,
+      linhGroup: "",
+      councilScoreRatio: 80,
+      supervisorScoreRatio: 20,
+      submissionFolderLink: "",
+      submissionDescription: "",
+      councilRubricId: "",
+      supervisorRubricId: "",
+    },
+  });
+
+  // Load session types from database
   React.useEffect(() => {
     let mounted = true;
     (async () => {
-      setIsLoadingCompanies(true);
       try {
-        const list = await companiesService.getAll();
-        const mapped = (list || []).map(
-          (c: any) => ({ id: String(c.id), name: c.name } as InternshipCompany)
-        );
-        if (!mounted) return;
-        setCompanies(mapped);
-      } catch (err) {
-        console.error("Failed to load companies from backend:", err);
-        if (mounted) setCompanies([]);
+        const types = await defenseService.getSessionTypes();
+        if (mounted) {
+          setSessionTypes(types);
+          if (!form.getValues("sessionType") && types.length > 0) {
+            form.setValue("sessionType", String(types[0].session_type));
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load session types:", error);
+        if (mounted) {
+          toast({
+            variant: "destructive",
+            title: "Lỗi",
+            description: "Không thể tải danh sách loại đợt báo cáo.",
+          });
+        }
       } finally {
-        if (mounted) setIsLoadingCompanies(false);
+        if (mounted) setIsLoadingTypes(false);
       }
     })();
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [toast]);
 
-  const toDate = (timestamp: any): Date | undefined => {
-    if (timestamp instanceof Timestamp) {
-      return timestamp.toDate();
-    }
-    if (timestamp && typeof timestamp.toDate === "function") {
-      return timestamp.toDate();
-    }
-    return timestamp;
-  };
-
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      name: sessionToCopy ? `${sessionToCopy.name} (Copy)` : "",
-      sessionType: sessionToCopy?.sessionType || "combined",
-      description: sessionToCopy?.description || "",
-      zaloGroupLink: sessionToCopy?.zaloGroupLink || "",
-      postDefenseSubmissionLink: sessionToCopy?.postDefenseSubmissionLink || "",
-      postDefenseSubmissionDescription:
-        sessionToCopy?.postDefenseSubmissionDescription || "",
-      companyIds: sessionToCopy?.companyIds || [],
-      councilGraduationRubricId: sessionToCopy?.councilGraduationRubricId || "",
-      councilInternshipRubricId: sessionToCopy?.councilInternshipRubricId || "",
-      supervisorGraduationRubricId:
-        sessionToCopy?.supervisorGraduationRubricId || "",
-      companyInternshipRubricId: sessionToCopy?.companyInternshipRubricId || "",
-      graduationCouncilWeight: sessionToCopy?.graduationCouncilWeight ?? 80,
-      internshipCouncilWeight: sessionToCopy?.internshipCouncilWeight ?? 50,
-      startDate: sessionToCopy ? undefined : new Date(),
-      registrationDeadline: undefined,
-      expectedReportDate: undefined,
-    },
-  });
+  // Load rubrics from database
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [council, supervisor] = await Promise.all([
+          defenseService.getRubrics("council"),
+          defenseService.getRubrics("supervisor"),
+        ]);
+        if (mounted) {
+          setCouncilRubrics(
+            council.length > 0
+              ? council
+              : [
+                  {
+                    id: 1,
+                    name: "Rubric Hội Đồng Mặc Định",
+                    rubric_type: "council",
+                    total_score: 100,
+                    is_active: true,
+                  },
+                ]
+          );
+          setSupervisorRubrics(
+            supervisor.length > 0
+              ? supervisor
+              : [
+                  {
+                    id: 2,
+                    name: "Rubric Giáo Viên Mặc Định",
+                    rubric_type: "supervisor",
+                    total_score: 100,
+                    is_active: true,
+                  },
+                ]
+          );
+        }
+      } catch (error) {
+        console.error("Failed to load rubrics:", error);
+        if (mounted) {
+          // Set default rubrics if API fails
+          setCouncilRubrics([
+            {
+              id: 1,
+              name: "Rubric Hội Đồng Mặc Định",
+              rubric_type: "council",
+              total_score: 100,
+              is_active: true,
+            },
+          ]);
+          setSupervisorRubrics([
+            {
+              id: 2,
+              name: "Rubric Giáo Viên Mặc Định",
+              rubric_type: "supervisor",
+              total_score: 100,
+              is_active: true,
+            },
+          ]);
+          toast({
+            variant: "destructive",
+            title: "Lỗi",
+            description:
+              "Không thể tải danh sách rubric từ server. Sử dụng rubric mặc định.",
+          });
+        }
+      } finally {
+        if (mounted) setIsLoadingRubrics(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [toast]);
 
   const sessionType = useWatch({
     control: form.control,
@@ -224,109 +253,70 @@ export function AddDefenseSessionForm({
     }
   }, [startDate, form]);
 
-  const cleanRubricId = (value: string | undefined) =>
-    value === NO_RUBRIC_VALUE ? "" : value;
-
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    const collectionRef = collection(firestore, "graduationDefenseSessions");
-    const newSessionData = {
-      ...values,
-      councilGraduationRubricId: cleanRubricId(
-        values.councilGraduationRubricId
-      ),
-      councilInternshipRubricId: cleanRubricId(
-        values.councilInternshipRubricId
-      ),
-      supervisorGraduationRubricId: cleanRubricId(
-        values.supervisorGraduationRubricId
-      ),
-      companyInternshipRubricId: cleanRubricId(
-        values.companyInternshipRubricId
-      ),
-      status: "upcoming" as const, // Default status for a new session
-      createdAt: serverTimestamp(),
+    if (!values.sessionType) {
+      toast({
+        variant: "destructive",
+        title: "Thiếu loại đợt báo cáo",
+        description: "Vui lòng chọn loại đợt báo cáo trước khi lưu.",
+      });
+      return;
+    }
+
+    const payload = {
+      name: values.name,
+      session_type: values.sessionType || null,
+      start_date: values.startDate
+        ? values.startDate.toISOString().split("T")[0]
+        : null,
+      registration_deadline: values.registrationDeadline
+        ? values.registrationDeadline.toISOString().split("T")[0]
+        : null,
+      submission_deadline: values.submissionDeadline
+        ? values.submissionDeadline.toISOString().split("T")[0]
+        : null,
+      expected_date: values.expectedReportDate
+        ? values.expectedReportDate.toISOString().split("T")[0]
+        : null,
+      description: values.description || null,
+      // Use DB enum for status
+      status: "scheduled",
+      linh_group: values.linhGroup || null,
+      council_score_ratio: values.councilScoreRatio || null,
+      supervisor_score_ratio: values.supervisorScoreRatio || null,
+      submission_folder_link: values.submissionFolderLink || null,
+      submission_description: values.submissionDescription || null,
+      council_rubric_id: values.councilRubricId
+        ? Number(values.councilRubricId)
+        : null,
+      supervisor_rubric_id: values.supervisorRubricId
+        ? Number(values.supervisorRubricId)
+        : null,
     };
 
-    addDoc(collectionRef, newSessionData)
-      .then(() => {
-        toast({
-          title: "Thành công",
-          description: `Đợt báo cáo "${values.name}" đã được tạo.`,
-        });
-        onFinished();
-      })
-      .catch((error) => {
-        const contextualError = new FirestorePermissionError({
-          path: collectionRef.path,
-          operation: "create",
-          requestResourceData: newSessionData,
-        });
-        errorEmitter.emit("permission-error", contextualError);
+    try {
+      await defenseService.create(payload as any);
+      toast({
+        title: "Thành công",
+        description: `Đợt báo cáo "${values.name}" đã được tạo.`,
       });
+      onFinished();
+    } catch (error) {
+      console.error("Failed to create defense session via API:", error);
+      toast({
+        variant: "destructive",
+        title: "Ôi! Đã xảy ra lỗi.",
+        description: "Không thể tạo đợt báo cáo.",
+      });
+    }
   }
-
-  const RubricSelector = ({
-    name,
-    label,
-    icon,
-  }: {
-    name: any;
-    label: string;
-    icon: React.ReactNode;
-  }) => (
-    <FormField
-      control={form.control}
-      name={name}
-      render={({ field }) => (
-        <FormItem>
-          <FormLabel className="flex items-center gap-2">
-            {icon}
-            {label}
-          </FormLabel>
-          <Select
-            onValueChange={field.onChange}
-            value={field.value || NO_RUBRIC_VALUE}
-            disabled={isLoadingRubrics}
-          >
-            <FormControl>
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    isLoadingRubrics ? "Đang tải..." : "Chọn một rubric"
-                  }
-                />
-              </SelectTrigger>
-            </FormControl>
-            <SelectContent>
-              <SelectItem value={NO_RUBRIC_VALUE}>
-                Không sử dụng Rubric
-              </SelectItem>
-              {rubrics?.map((rubric) => (
-                <SelectItem key={rubric.id} value={rubric.id}>
-                  {rubric.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FormMessage />
-        </FormItem>
-      )}
-    />
-  );
-
-  const selectedCompanyIds =
-    useWatch({ control: form.control, name: "companyIds" }) || [];
 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>
-          {sessionToCopy ? "Sao chép Đợt báo cáo" : "Tạo Đợt báo cáo mới"}
-        </DialogTitle>
+        <DialogTitle>Tạo Đợt báo cáo mới</DialogTitle>
         <DialogDescription>
-          {sessionToCopy
-            ? `Tạo một bản sao của "${sessionToCopy.name}". Vui lòng cập nhật lại thời gian.`
-            : "Điền thông tin chi tiết để tạo một đợt báo cáo mới."}
+          Điền thông tin chi tiết để tạo một đợt báo cáo mới.
         </DialogDescription>
       </DialogHeader>
       <Form {...form}>
@@ -356,36 +346,25 @@ export function AddDefenseSessionForm({
                   <FormItem className="space-y-3">
                     <FormLabel>Loại đợt báo cáo</FormLabel>
                     <FormControl>
-                      <RadioGroup
+                      <Select
+                        value={field.value || ""}
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
-                        className="flex items-center space-x-4"
+                        disabled={isLoadingTypes}
                       >
-                        <FormItem className="flex items-center space-x-2 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="graduation" />
-                          </FormControl>
-                          <FormLabel className="font-normal">
-                            Chỉ Tốt nghiệp
-                          </FormLabel>
-                        </FormItem>
-                        <FormItem className="flex items-center space-x-2 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="internship" />
-                          </FormControl>
-                          <FormLabel className="font-normal">
-                            Chỉ Thực tập
-                          </FormLabel>
-                        </FormItem>
-                        <FormItem className="flex items-center space-x-2 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="combined" />
-                          </FormControl>
-                          <FormLabel className="font-normal">
-                            Kết hợp cả hai
-                          </FormLabel>
-                        </FormItem>
-                      </RadioGroup>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Chọn loại đợt báo cáo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {sessionTypes.map((type) => (
+                            <SelectItem
+                              key={type.session_type}
+                              value={String(type.session_type)}
+                            >
+                              {type.display_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -407,8 +386,14 @@ export function AddDefenseSessionForm({
                                 "w-full pl-3 text-left font-normal",
                                 !field.value && "text-muted-foreground"
                               )}
+                              disabled={
+                                form.formState.isSubmitting ||
+                                isLoadingTypes ||
+                                isLoadingRubrics ||
+                                !form.getValues("sessionType")
+                              }
                             >
-                              {field.value ? (
+                              {field.value && !isNaN(field.value.getTime()) ? (
                                 format(field.value, "PPP")
                               ) : (
                                 <span>Chọn một ngày</span>
@@ -420,7 +405,11 @@ export function AddDefenseSessionForm({
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
-                            selected={field.value}
+                            selected={
+                              field.value && !isNaN(field.value.getTime())
+                                ? field.value
+                                : undefined
+                            }
                             onSelect={field.onChange}
                             disabled={(date) => date < new Date("1990-01-01")}
                             initialFocus
@@ -447,7 +436,7 @@ export function AddDefenseSessionForm({
                                 !field.value && "text-muted-foreground"
                               )}
                             >
-                              {field.value ? (
+                              {field.value && !isNaN(field.value.getTime()) ? (
                                 format(field.value, "PPP")
                               ) : (
                                 <span>Chọn một ngày</span>
@@ -459,7 +448,97 @@ export function AddDefenseSessionForm({
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
-                            selected={field.value}
+                            selected={
+                              field.value && !isNaN(field.value.getTime())
+                                ? field.value
+                                : undefined
+                            }
+                            onSelect={field.onChange}
+                            disabled={(date) => date < new Date("1990-01-01")}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="submissionDeadline"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Hạn nộp báo cáo</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant={"outline"}
+                              className={cn(
+                                "w-full pl-3 text-left font-normal",
+                                !field.value && "text-muted-foreground"
+                              )}
+                            >
+                              {field.value && !isNaN(field.value.getTime()) ? (
+                                format(field.value, "PPP")
+                              ) : (
+                                <span>Chọn một ngày</span>
+                              )}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={
+                              field.value && !isNaN(field.value.getTime())
+                                ? field.value
+                                : undefined
+                            }
+                            onSelect={field.onChange}
+                            disabled={(date) => date < new Date("1990-01-01")}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="expectedReportDate"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Ngày báo cáo dự kiến</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant={"outline"}
+                              className={cn(
+                                "w-full pl-3 text-left font-normal",
+                                !field.value && "text-muted-foreground"
+                              )}
+                            >
+                              {field.value && !isNaN(field.value.getTime()) ? (
+                                format(field.value, "PPP")
+                              ) : (
+                                <span>Chọn một ngày</span>
+                              )}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={
+                              field.value && !isNaN(field.value.getTime())
+                                ? field.value
+                                : undefined
+                            }
                             onSelect={field.onChange}
                             disabled={(date) => date < new Date("1990-01-01")}
                             initialFocus
@@ -471,279 +550,6 @@ export function AddDefenseSessionForm({
                   )}
                 />
               </div>
-              <FormField
-                control={form.control}
-                name="expectedReportDate"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Ngày báo cáo dự kiến</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant={"outline"}
-                            className={cn(
-                              "w-full pl-3 text-left font-normal",
-                              !field.value && "text-muted-foreground"
-                            )}
-                          >
-                            {field.value ? (
-                              format(field.value, "PPP")
-                            ) : (
-                              <span>Chọn một ngày</span>
-                            )}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          disabled={(date) => date < new Date("1990-01-01")}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <Separator />
-              <p className="text-sm font-medium">Gán Rubric cho đợt báo cáo</p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(sessionType === "graduation" ||
-                  sessionType === "combined") && (
-                  <>
-                    <RubricSelector
-                      name="councilGraduationRubricId"
-                      label="Hội đồng chấm Tốt nghiệp"
-                      icon={<GraduationCap className="h-4 w-4" />}
-                    />
-                    <RubricSelector
-                      name="supervisorGraduationRubricId"
-                      label="GVHD chấm Tốt nghiệp"
-                      icon={<GraduationCap className="h-4 w-4" />}
-                    />
-                  </>
-                )}
-                {(sessionType === "internship" ||
-                  sessionType === "combined") && (
-                  <>
-                    <RubricSelector
-                      name="councilInternshipRubricId"
-                      label="Hội đồng chấm Thực tập"
-                      icon={<Briefcase className="h-4 w-4" />}
-                    />
-                    <RubricSelector
-                      name="companyInternshipRubricId"
-                      label="Đơn vị chấm Thực tập"
-                      icon={<UserCheck className="h-4 w-4" />}
-                    />
-                  </>
-                )}
-              </div>
-
-              {(sessionType === "graduation" || sessionType === "combined") && (
-                <>
-                  <Separator />
-                  <p className="text-sm font-medium">
-                    Tùy chỉnh Tỷ lệ điểm Tốt nghiệp
-                  </p>
-
-                  <FormField
-                    control={form.control}
-                    name="graduationCouncilWeight"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tỷ lệ điểm Hội đồng/GVHD</FormLabel>
-                        <div className="flex items-center gap-4">
-                          <span className="text-xs text-muted-foreground">
-                            HĐ: {field.value}%
-                          </span>
-                          <Slider
-                            value={[field.value ?? 80]}
-                            onValueChange={(value) => field.onChange(value[0])}
-                            max={100}
-                            step={5}
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            GVHD: {100 - (field.value ?? 80)}%
-                          </span>
-                        </div>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </>
-              )}
-
-              {(sessionType === "internship" || sessionType === "combined") && (
-                <>
-                  {sessionType !== "graduation" && <Separator />}
-                  <p className="text-sm font-medium">
-                    Tùy chỉnh Tỷ lệ điểm Thực tập
-                  </p>
-                  <FormField
-                    control={form.control}
-                    name="internshipCouncilWeight"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tỷ lệ điểm Hội đồng/Đơn vị</FormLabel>
-                        <div className="flex items-center gap-4">
-                          <span className="text-xs text-muted-foreground">
-                            HĐ: {field.value}%
-                          </span>
-                          <Slider
-                            value={[field.value ?? 50]}
-                            onValueChange={(value) => field.onChange(value[0])}
-                            max={100}
-                            step={5}
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            ĐV: {100 - (field.value ?? 50)}%
-                          </span>
-                        </div>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <Separator />
-                  <FormField
-                    control={form.control}
-                    name="companyIds"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="flex items-center gap-2">
-                          <Building className="h-4 w-4" />
-                          Doanh nghiệp tham gia
-                        </FormLabel>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                className="w-full justify-between h-auto min-h-10"
-                              >
-                                <div className="flex flex-wrap gap-2">
-                                  {selectedCompanyIds.length > 0 ? (
-                                    companies
-                                      ?.filter((c) =>
-                                        selectedCompanyIds.includes(c.id)
-                                      )
-                                      .map((c) => (
-                                        <Badge key={c.id} variant="secondary">
-                                          {c.name}
-                                        </Badge>
-                                      ))
-                                  ) : (
-                                    <span className="font-normal text-muted-foreground">
-                                      Chọn doanh nghiệp...
-                                    </span>
-                                  )}
-                                </div>
-                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                            <Command>
-                              <CommandInput placeholder="Tìm doanh nghiệp..." />
-                              <CommandList>
-                                <CommandEmpty>
-                                  Không tìm thấy doanh nghiệp.
-                                </CommandEmpty>
-                                <CommandGroup>
-                                  {companies?.map((company) => (
-                                    <CommandItem
-                                      key={company.id}
-                                      onSelect={() => {
-                                        const currentIds = field.value || [];
-                                        const newIds = currentIds.includes(
-                                          company.id
-                                        )
-                                          ? currentIds.filter(
-                                              (id) => id !== company.id
-                                            )
-                                          : [...currentIds, company.id];
-                                        field.onChange(newIds);
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4",
-                                          field.value?.includes(company.id)
-                                            ? "opacity-100"
-                                            : "opacity-0"
-                                        )}
-                                      />
-                                      {company.name}
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </>
-              )}
-
-              <Separator />
-              <p className="text-sm font-medium">Nộp báo cáo sau Hội đồng</p>
-              <FormField
-                control={form.control}
-                name="postDefenseSubmissionLink"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Link nộp bài</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://forms.gle/..." {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="postDefenseSubmissionDescription"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Mô tả/Yêu cầu</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Nhập các yêu cầu khi nộp bài: thành phần, định dạng,..."
-                        className="resize-y"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <Separator />
-
-              <FormField
-                control={form.control}
-                name="zaloGroupLink"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Link nhóm Zalo (tùy chọn)</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://zalo.me/g/..." {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
               <FormField
                 control={form.control}
                 name="description"
@@ -761,14 +567,173 @@ export function AddDefenseSessionForm({
                   </FormItem>
                 )}
               />
+              <FormField
+                control={form.control}
+                name="linhGroup"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Linh Group (tùy chọn)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Nhập nhóm linh..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="councilScoreRatio"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tỉ lệ điểm hội đồng (%)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="80"
+                          {...field}
+                          onChange={(e) =>
+                            field.onChange(Number(e.target.value))
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="supervisorScoreRatio"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tỉ lệ điểm GVHD (%)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="20"
+                          {...field}
+                          onChange={(e) =>
+                            field.onChange(Number(e.target.value))
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={form.control}
+                name="submissionFolderLink"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Link thư mục nộp bài (tùy chọn)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="submissionDescription"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mô tả yêu cầu nộp (tùy chọn)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Nhập mô tả yêu cầu nộp bài..."
+                        className="resize-none"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="councilRubricId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Rubric hội đồng (tùy chọn)</FormLabel>
+                      <FormControl>
+                        <Select
+                          value={field.value || ""}
+                          onValueChange={field.onChange}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Chọn rubric hội đồng" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {councilRubrics
+                              .filter((rubric) => rubric && rubric.id)
+                              .map((rubric) => (
+                                <SelectItem
+                                  key={rubric.id}
+                                  value={String(rubric.id)}
+                                >
+                                  {rubric.name || "Unnamed Rubric"}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="supervisorRubricId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Rubric GVHD (tùy chọn)</FormLabel>
+                      <FormControl>
+                        <Select
+                          value={field.value || ""}
+                          onValueChange={field.onChange}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Chọn rubric GVHD" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {supervisorRubrics
+                              .filter((rubric) => rubric && rubric.id)
+                              .map((rubric) => (
+                                <SelectItem
+                                  key={rubric.id}
+                                  value={String(rubric.id)}
+                                >
+                                  {rubric.name || "Unnamed Rubric"}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </div>
           </ScrollArea>
           <DialogFooter className="pt-4 border-t">
             <Button type="button" variant="outline" onClick={onFinished}>
               Hủy
             </Button>
-            <Button type="submit" disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting ? "Đang tạo..." : "Tạo đợt báo cáo"}
+            <Button
+              type="submit"
+              disabled={
+                form.formState.isSubmitting ||
+                isLoadingTypes ||
+                isLoadingRubrics ||
+                !form.getValues("sessionType")
+              }
+            >
+              {form.formState.isSubmitting ? "Đang tạo..." : "Tạo mới"}
             </Button>
           </DialogFooter>
         </form>
@@ -776,3 +741,6 @@ export function AddDefenseSessionForm({
     </>
   );
 }
+
+// Also provide a default export for compatibility with different import styles
+export default AddDefenseSessionForm;

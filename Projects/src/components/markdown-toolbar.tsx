@@ -39,6 +39,7 @@ export function MarkdownToolbar({
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const value = textarea.value;
+    if (typeof value !== "string") return;
     const selectedText = value.substring(start, end);
 
     let prefix = "";
