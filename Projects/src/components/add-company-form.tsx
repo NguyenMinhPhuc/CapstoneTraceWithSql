@@ -326,6 +326,12 @@ const positionSchema = z.object({
 const formSchema = z.object({
   name: z.string().min(1, { message: "Tên doanh nghiệp là bắt buộc." }),
   address: z.string().optional(),
+  phone: z.string().optional(),
+  email: z
+    .string()
+    .email({ message: "Email không hợp lệ." })
+    .optional()
+    .or(z.literal("")),
   website: z
     .string()
     .url({ message: "Vui lòng nhập URL hợp lệ." })
@@ -339,6 +345,8 @@ const formSchema = z.object({
     .optional()
     .or(z.literal("")),
   contactPhone: z.string().optional(),
+  manager_name: z.string().optional(),
+  manager_phone: z.string().optional(),
   isLHU: z.boolean().default(false),
   companySupervisorId: z.string().optional(),
   companySupervisorName: z.string().optional(),
@@ -369,11 +377,15 @@ export function AddCompanyForm({
     defaultValues: {
       name: "",
       address: "",
+      phone: "",
+      email: "",
       website: "",
       description: "",
       contactName: "",
       contactEmail: "",
       contactPhone: "",
+      manager_name: "",
+      manager_phone: "",
       isLHU: false,
       companySupervisorId: "",
       companySupervisorName: "",
@@ -431,6 +443,8 @@ export function AddCompanyForm({
         address: values.address || "",
         website: values.website || "",
         description: values.description || "",
+        phone: values.phone || "",
+        email: values.email || "",
         company_type: hideIsLHU
           ? "external"
           : values.isLHU
@@ -438,12 +452,14 @@ export function AddCompanyForm({
           : "external",
         is_active: true,
       };
+      // Contact person (if provided)
+      if (values.contactName) payload.contact_person = values.contactName;
+      if (values.contactPhone) payload.contact_phone = values.contactPhone;
 
-      if (!(hideIsLHU ? false : values.isLHU)) {
-        payload.contact_person = values.contactName || "";
-        payload.email = values.contactEmail || "";
-        payload.contact_phone = values.contactPhone || "";
-      }
+      // Manager info (prefer manager_name from form, fallback to selected supervisor name)
+      payload.manager_name =
+        values.manager_name || values.companySupervisorName || "";
+      payload.manager_phone = values.manager_phone || "";
 
       await companiesService.create(payload);
       toast({
@@ -489,102 +505,197 @@ export function AddCompanyForm({
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <ScrollArea className="h-[60vh] pr-6">
             <div className="space-y-4 py-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tên Doanh nghiệp / Phòng ban</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Công ty TNHH ABC" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              {!hideIsLHU && (
-                <FormField
-                  control={form.control}
-                  name="isLHU"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                      <div className="space-y-0.5">
-                        <FormLabel>Đây là phòng ban của LHU?</FormLabel>
+              {/* Basic information */}
+              <div className="space-y-2">
+                <h3 className="text-lg font-medium">1. Thông tin cơ bản</h3>
+                <div className="space-y-3 pt-2">
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tên Doanh nghiệp / Phòng ban</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Công ty TNHH ABC" {...field} />
+                        </FormControl>
                         <FormMessage />
-                      </div>
-                      <FormControl>
-                        <Switch
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              )}
-              <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Địa chỉ</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="123 Đường ABC, Quận 1, TP.HCM"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="website"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Website</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://example.com" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Mô tả</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Mô tả về công ty, lĩnh vực hoạt động, vị trí thực tập, yêu cầu..."
-                        className="resize-y"
-                        {...field}
-                      />
-                    </FormControl>
-                    <p className="text-xs text-muted-foreground">
-                      Hỗ trợ Markdown (tiêu đề, danh sách, liên kết, bảng...)
-                    </p>
-                    <FormMessage />
-                    {field.value && (
-                      <div className="mt-2 border rounded-md p-3 bg-muted/20 markdown-preview">
-                        <div className="text-xs font-medium mb-1 text-muted-foreground">
-                          Xem trước
-                        </div>
-                        <div>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {field.value}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
+                      </FormItem>
                     )}
-                  </FormItem>
-                )}
-              />
+                  />
+
+                  {!hideIsLHU && (
+                    <FormField
+                      control={form.control}
+                      name="isLHU"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                          <div className="space-y-0.5">
+                            <FormLabel>Loại doanh nghiệp</FormLabel>
+                            <div className="text-sm text-muted-foreground">
+                              Chuyển sang nếu là đơn vị nội bộ LHU
+                            </div>
+                            <FormMessage />
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <FormField
+                      control={form.control}
+                      name="phone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Điện thoại (cơ quan)</FormLabel>
+                          <FormControl>
+                            <Input placeholder="(84) 24 3xx xxxx" {...field} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Email (cơ quan)</FormLabel>
+                          <FormControl>
+                            <Input placeholder="info@example.com" {...field} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="address"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Địa chỉ</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="123 Đường ABC, Quận 1, TP.HCM"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="website"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Website</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://example.com" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="description"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Mô tả</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Mô tả về công ty, lĩnh vực hoạt động, vị trí thực tập, yêu cầu..."
+                            className="resize-y"
+                            {...field}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">
+                          Hỗ trợ Markdown (tiêu đề, danh sách, liên kết,
+                          bảng...)
+                        </p>
+                        <FormMessage />
+                        {field.value && (
+                          <div className="mt-2 border rounded-md p-3 bg-muted/20 markdown-preview">
+                            <div className="text-xs font-medium mb-1 text-muted-foreground">
+                              Xem trước
+                            </div>
+                            <div>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {field.value}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
 
               {/* Logo removed */}
+
+              <Separator />
+              <div>
+                <h3 className="text-lg font-medium mb-2">
+                  2. Thông tin liên hệ
+                </h3>
+                <div className="space-y-3 pt-2">
+                  <FormField
+                    control={form.control}
+                    name="contactName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tên người liên hệ</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Nguyễn Văn A" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="contactEmail"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Email liên hệ</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="contact@example.com"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="contactPhone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Số điện thoại liên hệ</FormLabel>
+                          <FormControl>
+                            <Input placeholder="090 xxx xxxx" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+              </div>
 
               <Separator />
               <div>
@@ -706,79 +817,122 @@ export function AddCompanyForm({
               </div>
               <Separator />
 
-              {!(hideIsLHU ? false : isLHU) && (
-                <>
-                  <FormField
-                    control={form.control}
-                    name="companySupervisorId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>GV hướng dẫn (trường)</FormLabel>
-                        <FormControl>
-                          <SupervisorCombobox
-                            value={field.value || null}
-                            onChange={(supervisorId) =>
-                              field.onChange(supervisorId || "")
-                            }
-                            onSupervisorSelect={(s: Supervisor | null) => {
-                              form.setValue("companySupervisorId", s?.id || "");
-                              form.setValue(
-                                "companySupervisorName",
-                                s ? `${s.firstName} ${s.lastName}` : ""
-                              );
-                            }}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="contactName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tên người liên hệ</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Nguyễn Văn A" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Separator />
+
+              {/* Manager info */}
+              <div className="space-y-2">
+                <h3 className="text-lg font-medium">
+                  3. Thông tin người quản lý
+                </h3>
+                <div className="pt-2 space-y-3">
+                  {isLHU ? (
+                    // Internal: choose a supervisor as manager
                     <FormField
                       control={form.control}
-                      name="contactEmail"
+                      name="companySupervisorId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Email liên hệ</FormLabel>
+                          <FormLabel>Người quản lý (LHU)</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="contact@example.com"
-                              {...field}
+                            <SupervisorCombobox
+                              value={field.value || null}
+                              onChange={(supervisorId) =>
+                                field.onChange(supervisorId || "")
+                              }
+                              onSupervisorSelect={(s: Supervisor | null) => {
+                                form.setValue(
+                                  "companySupervisorId",
+                                  s?.id || ""
+                                );
+                                form.setValue(
+                                  "companySupervisorName",
+                                  s ? `${s.firstName} ${s.lastName}` : ""
+                                );
+                                // also populate manager_name/phone for API
+                                form.setValue(
+                                  "manager_name",
+                                  s ? `${s.firstName} ${s.lastName}` : ""
+                                );
+                                form.setValue("manager_phone", s?.phone || "");
+                              }}
                             />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={form.control}
-                      name="contactPhone"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Số điện thoại liên hệ</FormLabel>
-                          <FormControl>
-                            <Input placeholder="090 xxx xxxx" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </>
-              )}
+                  ) : (
+                    // External: optional supervisor selection + manager name/phone inputs
+                    <>
+                      <FormField
+                        control={form.control}
+                        name="companySupervisorId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Chọn giảng viên (nếu có)</FormLabel>
+                            <FormControl>
+                              <SupervisorCombobox
+                                value={field.value || null}
+                                onChange={(supervisorId) =>
+                                  field.onChange(supervisorId || "")
+                                }
+                                onSupervisorSelect={(s: Supervisor | null) => {
+                                  form.setValue(
+                                    "companySupervisorId",
+                                    s?.id || ""
+                                  );
+                                  form.setValue(
+                                    "companySupervisorName",
+                                    s ? `${s.firstName} ${s.lastName}` : ""
+                                  );
+                                  form.setValue(
+                                    "manager_name",
+                                    s ? `${s.firstName} ${s.lastName}` : ""
+                                  );
+                                  form.setValue(
+                                    "manager_phone",
+                                    s?.phone || ""
+                                  );
+                                }}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="manager_name"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Tên người quản lý</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Nguyễn Văn B" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="manager_phone"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>SĐT người quản lý</FormLabel>
+                              <FormControl>
+                                <Input placeholder="090 xxx xxxx" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           </ScrollArea>
           <DialogFooter className="pt-4 border-t">

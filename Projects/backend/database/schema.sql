@@ -334,25 +334,117 @@ GO
 -- =======================
 -- CREATE: DEFENSE SESSIONS & RELATED
 -- =======================
-CREATE TABLE dbo.defense_sessions
-(
-  id INT IDENTITY(1,1) PRIMARY KEY,
-  name NVARCHAR(255) NOT NULL,
-  session_type NVARCHAR(50) NOT NULL CHECK (session_type IN ('early_internship','graduation')),
-  date DATE NULL,
-  time_start TIME NULL,
-  time_end TIME NULL,
-  location NVARCHAR(255) NULL,
-  description NVARCHAR(MAX) NULL,
-  status NVARCHAR(50) NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','in_progress','completed','cancelled')),
-  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-  updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-  rowversion_col rowversion
-);
+USE [CapstoneTrack]
 GO
-CREATE NONCLUSTERED INDEX ix_defense_sessions_date ON dbo.defense_sessions(date);
-CREATE NONCLUSTERED INDEX ix_defense_sessions_type ON dbo.defense_sessions(session_type);
-CREATE NONCLUSTERED INDEX ix_defense_sessions_status ON dbo.defense_sessions(status);
+
+/****** Object:  Table [dbo].[defense_sessions]    Script Date: 06/12/2025 08:39:14 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+USE [CapstoneTrack]
+GO
+
+/****** Object:  Table [dbo].[session_type]    Script Date: 09/12/2025 14:01:23 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[session_type]
+(
+  [id] [nvarchar](50) NOT NULL,
+  [name] [nvarchar](250) NULL,
+  [description] [nvarchar](250) NULL,
+  [is_active] [bit] NOT NULL,
+  [create_at] [date] NOT NULL,
+  [update_at] [date] NULL,
+  CONSTRAINT [PK_session_type] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[session_type] ADD  CONSTRAINT [DF_session_type_is_active]  DEFAULT ((1)) FOR [is_active]
+GO
+
+ALTER TABLE [dbo].[session_type] ADD  CONSTRAINT [DF_session_type_create_at]  DEFAULT (getdate()) FOR [create_at]
+GO
+
+
+
+go
+CREATE TABLE [dbo].[defense_sessions]
+(
+  [id] [int] IDENTITY(1,1) NOT NULL,
+  [name] [nvarchar](255) NOT NULL,
+  [session_type] [nvarchar](50) NOT NULL,
+  [start_date] [date] NULL,
+  [registration_deadline] [date] NULL,
+  [submission_deadline] [date] NULL,
+  [expected_date] [date] NULL,
+  [description] [nvarchar](max) NULL,
+  [status] [nvarchar](50) NOT NULL,
+  [created_at] [datetime2](7) NOT NULL,
+  [updated_at] [datetime2](7) NOT NULL,
+  [rowversion_col] [timestamp] NOT NULL,
+  CONSTRAINT [PK__defense___3213E83FB2E5DEE9] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[defense_sessions] ADD  CONSTRAINT [DF__defense_s__statu__2077C861]  DEFAULT ('scheduled') FOR [status]
+GO
+
+ALTER TABLE [dbo].[defense_sessions] ADD  CONSTRAINT [DF__defense_s__creat__226010D3]  DEFAULT (sysutcdatetime()) FOR [created_at]
+GO
+
+ALTER TABLE [dbo].[defense_sessions] ADD  CONSTRAINT [DF__defense_s__updat__2354350C]  DEFAULT (sysutcdatetime()) FOR [updated_at]
+GO
+ALTER TABLE [dbo].[defense_sessions] 
+ADD  CONSTRAINT  fk_defense_sesions_sessions_type foreign key (session_type) references dbo.session_type(id) ON DELETE NO ACTION
+GO
+
+
+
+ALTER TABLE [dbo].[defense_sessions] CHECK CONSTRAINT [CK__defense_s__sessi__1F83A428]
+GO
+
+ALTER TABLE [dbo].[defense_sessions]  WITH CHECK ADD  CONSTRAINT [CK__defense_s__statu__216BEC9A] CHECK  (([status]='cancelled' OR [status]='completed' OR [status]='in_progress' OR [status]='scheduled'))
+GO
+
+ALTER TABLE [dbo].[defense_sessions] CHECK CONSTRAINT [CK__defense_s__statu__216BEC9A]
+GO
+
+-- Add new columns for defense sessions
+ALTER TABLE [dbo].[defense_sessions] ADD [linh_group] [nvarchar](50) NULL;
+GO
+ALTER TABLE [dbo].[defense_sessions] ADD [council_score_ratio] [int] NULL;
+GO
+ALTER TABLE [dbo].[defense_sessions] ADD [supervisor_score_ratio] [int] NULL;
+GO
+ALTER TABLE [dbo].[defense_sessions] ADD [submission_folder_link] [nvarchar](500) NULL;
+GO
+ALTER TABLE [dbo].[defense_sessions] ADD [submission_description] [nvarchar](max) NULL;
+GO
+ALTER TABLE [dbo].[defense_sessions] ADD [council_rubric_id] [int] NULL;
+GO
+ALTER TABLE [dbo].[defense_sessions] ADD [supervisor_rubric_id] [int] NULL;
+GO
+
+-- Add foreign keys for rubrics
+ALTER TABLE [dbo].[defense_sessions] ADD CONSTRAINT [FK_defense_sessions_council_rubric] FOREIGN KEY ([council_rubric_id]) REFERENCES [dbo].[rubrics] ([id]);
+GO
+ALTER TABLE [dbo].[defense_sessions] ADD CONSTRAINT [FK_defense_sessions_supervisor_rubric] FOREIGN KEY ([supervisor_rubric_id]) REFERENCES [dbo].[rubrics] ([id]);
+GO
+
+
+
 GO
 
 CREATE TABLE dbo.councils
@@ -824,4 +916,26 @@ GO
 -- 6) Run this script on a staging copy first.
 
 PRINT 'Schema creation completed.';
+GO
+
+-- =======================
+-- CREATE: DEFENSE REGISTRATIONS
+-- =======================
+CREATE TABLE dbo.defense_registrations
+(
+  id INT IDENTITY(1,1) PRIMARY KEY,
+  session_id INT NOT NULL,
+  student_id INT NOT NULL,
+  student_code NVARCHAR(50) NULL,
+  student_name NVARCHAR(255) NULL,
+  class_name NVARCHAR(100) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  rowversion_col rowversion,
+  CONSTRAINT fk_defense_registrations_session FOREIGN KEY (session_id) REFERENCES dbo.defense_sessions(id) ON DELETE NO ACTION,
+  CONSTRAINT fk_defense_registrations_student FOREIGN KEY (student_id) REFERENCES dbo.students(id) ON DELETE NO ACTION
+);
+GO
+CREATE NONCLUSTERED INDEX ix_defense_registrations_session ON dbo.defense_registrations(session_id);
+CREATE NONCLUSTERED INDEX ix_defense_registrations_student ON dbo.defense_registrations(student_id);
 GO

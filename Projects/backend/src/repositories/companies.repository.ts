@@ -58,6 +58,29 @@ export const companiesRepository = {
   },
   async create(data: CreateCompanyInput): Promise<Company> {
     const pool = getPool();
+    // Auto-generate external_id when not provided.
+    if (!data.external_id) {
+      const type = (data.company_type ?? "").toString().toLowerCase();
+      const isLhu = type.includes("lhu");
+      const prefix = isLhu ? "LHU" : "ext";
+
+      // Find the highest numeric suffix for this prefix
+      const req = pool.request();
+      req.input("prefix", sql.NVarChar(10), prefix + "%");
+      req.input("startPos", sql.Int, prefix.length + 1);
+      const q = `SELECT TOP 1 external_id FROM companies WHERE UPPER(external_id) LIKE UPPER(@prefix) ORDER BY TRY_CAST(SUBSTRING(external_id,@startPos,10) AS INT) DESC`;
+      const r = await req.query(q);
+      const last =
+        r.recordset && r.recordset[0] ? r.recordset[0].external_id : null;
+      let nextNum = 1;
+      if (last) {
+        const numPart = last.substring(prefix.length);
+        const parsed = parseInt(numPart, 10);
+        if (!isNaN(parsed)) nextNum = parsed + 1;
+      }
+      const nextStr = String(nextNum).padStart(3, "0");
+      data.external_id = `${prefix}${nextStr}`;
+    }
     const result = await pool
       .request()
       .input("external_id", sql.NVarChar(100), data.external_id ?? null)

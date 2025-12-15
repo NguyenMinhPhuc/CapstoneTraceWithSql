@@ -262,8 +262,9 @@ export function StudentManagementTable() {
     if (!students) return [];
     const courseSet = new Set<string>();
     students.forEach((student) => {
-      if (student.className && student.className.length >= 2) {
-        courseSet.add(student.className.substring(0, 2));
+      const cls = student.className;
+      if (typeof cls === "string" && cls.length >= 2) {
+        courseSet.add(cls.substring(0, 2));
       }
     });
     return Array.from(courseSet).sort();
@@ -326,7 +327,10 @@ export function StudentManagementTable() {
 
     const groupedByCourse: Record<string, any[]> = {};
     Object.entries(statsByClass).forEach(([className, stats]) => {
-      const course = className.substring(0, 2);
+      const course =
+        typeof className === "string" && className.length >= 2
+          ? className.substring(0, 2)
+          : "Unknown";
       if (!groupedByCourse[course]) {
         groupedByCourse[course] = [];
       }
@@ -1414,8 +1418,7 @@ export function StudentManagementTable() {
                   </Button>
                 </TableHead>
                 <TableHead>TT Học tập</TableHead>
-                <TableHead>TT Tốt nghiệp</TableHead>
-                <TableHead>TT Thực tập</TableHead>
+                <TableHead>Trạng thái báo cáo</TableHead>
                 <TableHead className="text-right">Hành động</TableHead>
               </TableRow>
             </TableHeader>
@@ -1481,34 +1484,27 @@ export function StudentManagementTable() {
                     </DropdownMenu>
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant={
-                        student.graduationStatus === "achieved"
-                          ? "default"
-                          : "outline"
-                      }
-                    >
-                      {
-                        completionStatusLabel[
-                          student.graduationStatus || "not_achieved"
-                        ]
-                      }
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        student.internshipStatus === "achieved"
-                          ? "default"
-                          : "outline"
-                      }
-                    >
-                      {
-                        completionStatusLabel[
-                          student.internshipStatus || "not_achieved"
-                        ]
-                      }
-                    </Badge>
+                    {(() => {
+                      const rs =
+                        (student as any).reportStatus ||
+                        student.graduationStatus ||
+                        student.internshipStatus ||
+                        null;
+                      const labelMap: Record<string, string> = {
+                        reporting: "Đang báo cáo",
+                        not_yet_reporting: "Chưa báo cáo",
+                        reported: "Đã báo cáo",
+                        not_reporting: "Không báo cáo",
+                        achieved: "Đã đạt",
+                        not_achieved: "Chưa đạt",
+                      };
+                      const variant = rs === "achieved" ? "default" : "outline";
+                      return (
+                        <Badge variant={variant as any}>
+                          {rs ? labelMap[rs] ?? String(rs) : "(Không)"}
+                        </Badge>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>

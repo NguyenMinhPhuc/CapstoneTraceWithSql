@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Table,
@@ -62,14 +62,7 @@ import {
   GraduationCap,
   Briefcase,
 } from "lucide-react";
-import {
-  useCollection,
-  useFirestore,
-  useMemoFirebase,
-  errorEmitter,
-  FirestorePermissionError,
-} from "@/firebase";
-import { collection, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { defenseService } from "@/services/defense.service";
 import type { DefenseSession } from "@/lib/types";
 import { Skeleton } from "./ui/skeleton";
 import { format } from "date-fns";
@@ -77,7 +70,7 @@ import { AddDefenseSessionForm } from "./add-defense-session-form";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
-import { EditDefenseSessionForm } from "./edit-defense-session-form";
+import EditDefenseSessionForm from "./edit-defense-session-form";
 import {
   Select,
   SelectTrigger,
@@ -139,15 +132,11 @@ const getAcademicYear = (date: Date): string => {
 };
 
 export function DefenseSessionsTable() {
-  const firestore = useFirestore();
   const { toast } = useToast();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<DefenseSession | null>(
-    null
-  );
-  const [sessionToCopy, setSessionToCopy] = useState<DefenseSession | null>(
     null
   );
   const [sessionToDelete, setSessionToDelete] = useState<DefenseSession | null>(
@@ -161,22 +150,66 @@ export function DefenseSessionsTable() {
     key: SortKey;
     direction: SortDirection;
   } | null>({ key: "startDate", direction: "desc" });
+  const [sessions, setSessions] = useState<any[] | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const sessionsCollectionRef = useMemoFirebase(
-    () => collection(firestore, "graduationDefenseSessions"),
-    [firestore]
-  );
-
-  const { data: sessions, isLoading } = useCollection<DefenseSession>(
-    sessionsCollectionRef
-  );
-
-  const toDate = (timestamp: any): Date | undefined => {
-    if (!timestamp) return undefined;
-    if (timestamp && typeof timestamp.toDate === "function") {
-      return timestamp.toDate();
+  const fetchSessions = async () => {
+    setIsLoading(true);
+    try {
+      const list = await defenseService.getAll();
+      // Normalize fields to match existing component expectations
+      const mapped = (list || []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        sessionType: s.session_type,
+        sessionTypeName: s.session_type_name,
+        startDate: s.start_date ? new Date(s.start_date) : undefined,
+        registrationDeadline: s.registration_deadline
+          ? new Date(s.registration_deadline)
+          : undefined,
+        submissionDeadline: s.submission_deadline
+          ? new Date(s.submission_deadline)
+          : undefined,
+        expectedReportDate: s.expected_date
+          ? new Date(s.expected_date)
+          : undefined,
+        description: s.description,
+        // Normalize DB status values to frontend labels used in UI
+        status:
+          s.status === "scheduled"
+            ? "upcoming"
+            : s.status === "in_progress"
+            ? "ongoing"
+            : s.status === "completed"
+            ? "completed"
+            : s.status,
+        _raw: s,
+      }));
+      setSessions(mapped);
+    } catch (err) {
+      console.error("Failed to load defense sessions from backend:", err);
+      setSessions([]);
+    } finally {
+      setIsLoading(false);
     }
-    return timestamp;
+  };
+
+  // initial load
+  useEffect(() => {
+    fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toDate = (value: any): Date | undefined => {
+    if (!value) return undefined;
+    if (value instanceof Date) return value;
+    try {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) return d;
+    } catch (e) {
+      /* ignore */
+    }
+    return undefined;
   };
 
   const academicYears = useMemo(() => {
@@ -257,7 +290,8 @@ export function DefenseSessionsTable() {
 
       const sessionTypeMatch =
         sessionTypeFilter === "all" ||
-        session.sessionType === sessionTypeFilter;
+        (session.sessionTypeName &&
+          session.sessionTypeName === sessionTypeFilter);
 
       return (
         searchMatch && statusMatch && academicYearMatch && sessionTypeMatch
@@ -307,7 +341,7 @@ export function DefenseSessionsTable() {
   };
 
   const handleCopyClick = (session: DefenseSession) => {
-    setSessionToCopy(session);
+    // Copy functionality removed - simplified form doesn't support copying
     setIsAddDialogOpen(true);
   };
 
@@ -318,58 +352,52 @@ export function DefenseSessionsTable() {
 
   const confirmDelete = async () => {
     if (!sessionToDelete) return;
-    const sessionDocRef = doc(
-      firestore,
-      "graduationDefenseSessions",
-      sessionToDelete.id
-    );
-
-    deleteDoc(sessionDocRef)
-      .then(() => {
-        toast({
-          title: "Thành công",
-          description: `Đợt báo cáo "${sessionToDelete.name}" đã được xóa.`,
-        });
-      })
-      .catch((error) => {
-        const contextualError = new FirestorePermissionError({
-          path: sessionDocRef.path,
-          operation: "delete",
-        });
-        errorEmitter.emit("permission-error", contextualError);
-      })
-      .finally(() => {
-        setIsDeleteDialogOpen(false);
-        setSessionToDelete(null);
+    try {
+      await defenseService.delete(sessionToDelete.id as number);
+      toast({
+        title: "Thành công",
+        description: `Đợt báo cáo "${sessionToDelete.name}" đã được xóa.`,
       });
+      await fetchSessions();
+    } catch (error) {
+      console.error("Error deleting defense session:", error);
+      toast({
+        variant: "destructive",
+        title: "Ôi! Đã xảy ra lỗi.",
+        description: "Không thể xóa đợt báo cáo.",
+      });
+    } finally {
+      setIsDeleteDialogOpen(false);
+      setSessionToDelete(null);
+    }
   };
 
   const handleStatusChange = async (
-    sessionId: string,
+    sessionId: number,
     newStatus: SessionStatus
   ) => {
-    const sessionDocRef = doc(
-      firestore,
-      "graduationDefenseSessions",
-      sessionId
-    );
-    const updateData = { status: newStatus };
+    // Map UI status to DB enum values
+    const statusMap: Record<SessionStatus, string> = {
+      upcoming: "scheduled",
+      ongoing: "in_progress",
+      completed: "completed",
+    };
 
-    updateDoc(sessionDocRef, updateData)
-      .then(() => {
-        toast({
-          title: "Thành công",
-          description: `Trạng thái đợt báo cáo đã được cập nhật.`,
-        });
-      })
-      .catch((error) => {
-        const contextualError = new FirestorePermissionError({
-          path: sessionDocRef.path,
-          operation: "update",
-          requestResourceData: updateData,
-        });
-        errorEmitter.emit("permission-error", contextualError);
+    try {
+      await defenseService.update(sessionId, { status: statusMap[newStatus] });
+      toast({
+        title: "Thành công",
+        description: `Trạng thái đợt báo cáo đã được cập nhật.`,
       });
+      await fetchSessions();
+    } catch (error) {
+      console.error("Error updating status:", error);
+      toast({
+        variant: "destructive",
+        title: "Ôi! Đã xảy ra lỗi.",
+        description: "Không thể cập nhật trạng thái.",
+      });
+    }
   };
 
   if (isLoading) {
@@ -455,15 +483,14 @@ export function DefenseSessionsTable() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <TabsList>
             <TabsTrigger value="all">Tất cả</TabsTrigger>
-            <TabsTrigger value="graduation">
+            <TabsTrigger value="Tốt nghiệp">
               <GraduationCap className="mr-2 h-4 w-4" />
               Tốt nghiệp
             </TabsTrigger>
-            <TabsTrigger value="internship">
+            <TabsTrigger value="Thực tập">
               <Briefcase className="mr-2 h-4 w-4" />
               Thực tập
             </TabsTrigger>
-            <TabsTrigger value="combined">Kết hợp</TabsTrigger>
           </TabsList>
           <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
             <div className="flex w-full sm:w-auto gap-2">
@@ -537,9 +564,6 @@ export function DefenseSessionsTable() {
               open={isAddDialogOpen}
               onOpenChange={(isOpen) => {
                 setIsAddDialogOpen(isOpen);
-                if (!isOpen) {
-                  setSessionToCopy(null); // Clear copy data when dialog closes
-                }
               }}
             >
               <DialogTrigger asChild>
@@ -550,11 +574,10 @@ export function DefenseSessionsTable() {
               </DialogTrigger>
               <DialogContent className="sm:max-w-lg">
                 <AddDefenseSessionForm
-                  onFinished={() => {
+                  onFinished={async () => {
                     setIsAddDialogOpen(false);
-                    setSessionToCopy(null);
+                    await fetchSessions();
                   }}
-                  sessionToCopy={sessionToCopy}
                 />
               </DialogContent>
             </Dialog>
@@ -634,7 +657,7 @@ export function DefenseSessionsTable() {
                             variant={typeInfo.variant}
                             className="w-fit mt-1"
                           >
-                            {typeInfo.label}
+                            {session.sessionTypeName || typeInfo.label}
                           </Badge>
                         </div>
                       </TableCell>
@@ -745,7 +768,10 @@ export function DefenseSessionsTable() {
           {selectedSession && (
             <EditDefenseSessionForm
               session={selectedSession}
-              onFinished={() => setIsEditDialogOpen(false)}
+              onFinished={async () => {
+                setIsEditDialogOpen(false);
+                await fetchSessions();
+              }}
             />
           )}
         </DialogContent>
