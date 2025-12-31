@@ -129,6 +129,114 @@ export const defenseController = {
     res.status(StatusCodes.CREATED).json({ success: true, data: created });
   }),
 
+  createRegistrationForCurrentUser: asyncHandler(
+    async (req: Request, res: Response) => {
+      const authReq = req as any;
+      const { sessionId } = req.params as { sessionId?: string };
+      const numericId = parseInt(sessionId || "", 10);
+      if (isNaN(numericId)) {
+        throw new AppError("Invalid session id", StatusCodes.BAD_REQUEST);
+      }
+
+      if (!authReq.user || !authReq.user.id) {
+        throw new AppError("Authentication required", StatusCodes.UNAUTHORIZED);
+      }
+
+      const pool = (await import("../database/connection")).getPool();
+
+      // Find student record for this user
+      const userId = authReq.user.id;
+      const studentResult = await pool
+        .request()
+        .input("userId", userId)
+        .query(
+          "SELECT id, student_code, class_id FROM dbo.students WHERE user_id = @userId"
+        );
+
+      if (!studentResult.recordset || studentResult.recordset.length === 0) {
+        throw new AppError(
+          "Student profile not found for user",
+          StatusCodes.BAD_REQUEST
+        );
+      }
+
+      const student = studentResult.recordset[0];
+      let className: string | null = null;
+      if (student.class_id) {
+        const classRes = await pool
+          .request()
+          .input("classId", student.class_id)
+          .query("SELECT code FROM dbo.classes WHERE id = @classId");
+        if (classRes.recordset && classRes.recordset.length > 0) {
+          className = classRes.recordset[0].code;
+        }
+      }
+
+      // Accept optional payload (project title etc.) but derive student id from DB
+      const payload = req.body || {};
+
+      const created = await defenseRepository.createRegistration({
+        session_id: numericId,
+        student_id: Number(student.id),
+        student_code: student.student_code ?? null,
+        student_name: payload.student_name ?? null,
+        class_name: className ?? payload.class_name ?? null,
+        graduation_status: payload.graduation_status ?? null,
+        internship_status: payload.internship_status ?? null,
+        report_status:
+          payload.report_status ??
+          payload.graduation_status ??
+          payload.internship_status ??
+          null,
+      });
+
+      res.status(StatusCodes.CREATED).json({ success: true, data: created });
+    }
+  ),
+
+  getRegistrationForCurrentUser: asyncHandler(
+    async (req: Request, res: Response) => {
+      const authReq = req as any;
+      if (!authReq.user || !authReq.user.id) {
+        throw new AppError("Authentication required", StatusCodes.UNAUTHORIZED);
+      }
+
+      const pool = (await import("../database/connection")).getPool();
+      const userId = authReq.user.id;
+
+      // Find student record
+      const studentResult = await pool
+        .request()
+        .input("userId", userId)
+        .query("SELECT id FROM dbo.students WHERE user_id = @userId");
+
+      if (!studentResult.recordset || studentResult.recordset.length === 0) {
+        return res.status(StatusCodes.OK).json({ success: true, data: null });
+      }
+
+      const studentId = Number(studentResult.recordset[0].id);
+
+      // Find registration tied to an ongoing session
+      const result = await pool
+        .request()
+        .input("studentId", studentId)
+        .query(
+          `SELECT dr.*, ds.name AS session_name, ds.status AS session_status
+         FROM dbo.defense_registrations dr
+         INNER JOIN dbo.defense_sessions ds ON ds.id = dr.session_id
+         WHERE dr.student_id = @studentId AND ds.status = 'ongoing'`
+        );
+
+      if (!result.recordset || result.recordset.length === 0) {
+        return res.status(StatusCodes.OK).json({ success: true, data: null });
+      }
+
+      return res
+        .status(StatusCodes.OK)
+        .json({ success: true, data: result.recordset[0] });
+    }
+  ),
+
   updateRegistration: asyncHandler(async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const payload = req.body;

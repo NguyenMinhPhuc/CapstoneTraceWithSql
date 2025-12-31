@@ -1169,13 +1169,23 @@ export function StudentRegistrationTable({
                               try {
                                 await defenseService.updateRegistration(
                                   Number(reg.id),
-                                  { report_status: val || null, report_status_note: "" } as any
+                                  {
+                                    report_status: val || null,
+                                    report_status_note: "",
+                                  } as any
                                 );
-                                toast({ title: "Thành công", description: "Đã cập nhật trạng thái." });
+                                toast({
+                                  title: "Thành công",
+                                  description: "Đã cập nhật trạng thái.",
+                                });
                                 onReload?.();
                               } catch (err) {
                                 console.error("Update status failed", err);
-                                toast({ variant: "destructive", title: "Lỗi", description: "Không thể cập nhật trạng thái." });
+                                toast({
+                                  variant: "destructive",
+                                  title: "Lỗi",
+                                  description: "Không thể cập nhật trạng thái.",
+                                });
                               }
                             }}
                           >
@@ -1183,7 +1193,9 @@ export function StudentRegistrationTable({
                               <SelectValue
                                 placeholder={
                                   unifiedStatus
-                                    ? (registrationStatusLabel as any)[unifiedStatus] || String(unifiedStatus)
+                                    ? (registrationStatusLabel as any)[
+                                        unifiedStatus
+                                      ] || String(unifiedStatus)
                                     : "(Không)"
                                 }
                               />

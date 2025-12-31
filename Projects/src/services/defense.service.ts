@@ -121,6 +121,28 @@ export const defenseService = {
     return res.data.data;
   },
 
+  async createRegistrationForCurrentUser(
+    sessionId: string,
+    payload: {
+      student_code?: string | null;
+      student_name?: string | null;
+      class_name?: string | null;
+      report_status?: string | null;
+      report_status_note?: string | null;
+    }
+  ) {
+    const res = await apiClient.post(
+      `/defense/sessions/${sessionId}/registrations/me`,
+      payload
+    );
+    return res.data.data;
+  },
+
+  async getMyRegistration() {
+    const res = await apiClient.get(`/defense/registrations/me`);
+    return res.data.data;
+  },
+
   async deleteRegistration(id: number) {
     const res = await apiClient.delete(`/defense/registrations/${id}`);
     return res.data.data;
