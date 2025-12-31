@@ -54,6 +54,20 @@ router.post(
   defenseController.createRegistration
 );
 
+// Student self-registration (authenticated students)
+router.post(
+  "/sessions/:sessionId/registrations/me",
+  authenticate,
+  defenseController.createRegistrationForCurrentUser
+);
+
+// Get current student's registration (for ongoing session)
+router.get(
+  "/registrations/me",
+  authenticate,
+  defenseController.getRegistrationForCurrentUser
+);
+
 // Delete a registration
 router.delete(
   "/registrations/:id",

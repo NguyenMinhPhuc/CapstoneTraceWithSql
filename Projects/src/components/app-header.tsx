@@ -88,6 +88,11 @@ export function AppHeader() {
               <DropdownMenuItem asChild>
                 <Link href="/profile">Profile</Link>
               </DropdownMenuItem>
+              {user?.role === "student" && (
+                <DropdownMenuItem asChild>
+                  <Link href="/register-internship">Đăng ký thực tập</Link>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem asChild>
                 <Link href="/help">Hướng dẫn</Link>
               </DropdownMenuItem>
